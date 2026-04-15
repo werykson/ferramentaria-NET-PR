@@ -1,5 +1,14 @@
 import { useMemo, useState } from "react";
 
+const CCS = [
+  "CC NET APOIO PR",
+  "CC NET CTA PR",
+  "CC NET LDA PR",
+  "CC NET MGA PR",
+  "CC NET LITORAL PR",
+  "CC NET SUDOESTE PR",
+];
+
 const MENU = [
   { key: "dashboard", label: "Dashboard" },
   { key: "itens", label: "Itens" },
@@ -8,6 +17,8 @@ const MENU = [
   { key: "estoque", label: "Estoque" },
   { key: "usuarios", label: "Usuários" },
 ];
+
+const emptyMinimos = () => Object.fromEntries(CCS.map((cc) => [cc, ""]));
 
 export default function App() {
   const [logado, setLogado] = useState(false);
@@ -19,9 +30,9 @@ export default function App() {
   const [itemForm, setItemForm] = useState({
     codigo: "",
     nome: "",
-    minimo: "",
     valor: "",
     qtdKit: "",
+    minimos: emptyMinimos(),
   });
 
   const login = () => {
@@ -39,6 +50,16 @@ export default function App() {
     setPagina("dashboard");
   };
 
+  const atualizarMinimo = (cc, valor) => {
+    setItemForm((prev) => ({
+      ...prev,
+      minimos: {
+        ...prev.minimos,
+        [cc]: valor,
+      },
+    }));
+  };
+
   const cadastrarItem = () => {
     if (!itemForm.codigo.trim() || !itemForm.nome.trim()) {
       alert("Preencha o código e o nome do item.");
@@ -49,18 +70,20 @@ export default function App() {
       id: Date.now(),
       codigo: itemForm.codigo.trim(),
       nome: itemForm.nome.trim(),
-      minimo: Number(itemForm.minimo || 0),
       valor: Number(itemForm.valor || 0),
       qtdKit: Number(itemForm.qtdKit || 0),
+      minimos: Object.fromEntries(
+        CCS.map((cc) => [cc, Number(itemForm.minimos[cc] || 0)])
+      ),
     };
 
     setItens((prev) => [...prev, novoItem]);
     setItemForm({
       codigo: "",
       nome: "",
-      minimo: "",
       valor: "",
       qtdKit: "",
+      minimos: emptyMinimos(),
     });
   };
 
@@ -156,8 +179,8 @@ export default function App() {
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>Visão geral</h3>
               <p style={styles.mutedText}>
-                Base do sistema pronta. Agora você já tem menu lateral e o
-                primeiro módulo funcionando.
+                Base do sistema pronta. Agora os itens já podem ter estoque
+                mínimo separado por centro de custo.
               </p>
             </div>
           </>
@@ -189,16 +212,6 @@ export default function App() {
               <input
                 style={styles.input}
                 type="number"
-                placeholder="Estoque mínimo"
-                value={itemForm.minimo}
-                onChange={(e) =>
-                  setItemForm({ ...itemForm, minimo: e.target.value })
-                }
-              />
-
-              <input
-                style={styles.input}
-                type="number"
                 placeholder="Valor unitário"
                 value={itemForm.valor}
                 onChange={(e) =>
@@ -217,6 +230,22 @@ export default function App() {
               />
             </div>
 
+            <div style={styles.sectionMini}>
+              <h4 style={styles.sectionMiniTitle}>Estoque mínimo por CC</h4>
+              <div style={styles.formGrid}>
+                {CCS.map((cc) => (
+                  <input
+                    key={cc}
+                    style={styles.input}
+                    type="number"
+                    placeholder={`${cc} - mínimo`}
+                    value={itemForm.minimos[cc]}
+                    onChange={(e) => atualizarMinimo(cc, e.target.value)}
+                  />
+                ))}
+              </div>
+            </div>
+
             <button style={styles.primaryButtonInline} onClick={cadastrarItem}>
               Cadastrar item
             </button>
@@ -227,9 +256,9 @@ export default function App() {
                   <tr>
                     <th style={styles.th}>Código</th>
                     <th style={styles.th}>Nome</th>
-                    <th style={styles.th}>Mínimo</th>
                     <th style={styles.th}>Valor</th>
                     <th style={styles.th}>Qtd/Kit</th>
+                    <th style={styles.th}>Mínimos por CC</th>
                     <th style={styles.th}>Ação</th>
                   </tr>
                 </thead>
@@ -245,11 +274,17 @@ export default function App() {
                       <tr key={item.id}>
                         <td style={styles.td}>{item.codigo}</td>
                         <td style={styles.td}>{item.nome}</td>
-                        <td style={styles.td}>{item.minimo}</td>
-                        <td style={styles.td}>
-                          R$ {item.valor.toFixed(2)}
-                        </td>
+                        <td style={styles.td}>R$ {item.valor.toFixed(2)}</td>
                         <td style={styles.td}>{item.qtdKit}</td>
+                        <td style={styles.td}>
+                          <div style={styles.minimosLista}>
+                            {CCS.map((cc) => (
+                              <div key={cc} style={styles.minimoLinha}>
+                                <strong>{cc}:</strong> {item.minimos[cc] || 0}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
                         <td style={styles.td}>
                           <button
                             style={styles.deleteButton}
@@ -476,6 +511,18 @@ const styles = {
     boxShadow: "0 8px 20px rgba(0,0,0,0.06)",
     marginTop: 24,
   },
+  sectionMini: {
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+  },
+  sectionMiniTitle: {
+    marginTop: 0,
+    marginBottom: 16,
+    color: "#0f172a",
+  },
   sectionTitle: {
     marginTop: 0,
     color: "#0f172a",
@@ -504,12 +551,24 @@ const styles = {
     borderBottom: "1px solid #e2e8f0",
     color: "#334155",
     fontSize: 14,
+    verticalAlign: "top",
   },
   td: {
     padding: 12,
     borderBottom: "1px solid #e2e8f0",
     fontSize: 14,
     color: "#0f172a",
+    verticalAlign: "top",
+  },
+  minimosLista: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minWidth: 240,
+  },
+  minimoLinha: {
+    fontSize: 12,
+    color: "#334155",
   },
   deleteButton: {
     padding: "8px 12px",
