@@ -84,6 +84,10 @@ export default function App() {
   link.download = "itens.csv";
   link.click();
 };
+
+  <button onClick={exportarCSV}>
+  Exportar CSV
+</button>
   
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(itens));
