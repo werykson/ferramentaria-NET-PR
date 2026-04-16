@@ -313,16 +313,7 @@ export default function App() {
 
   <button
     style={styles.secondaryButtonInline}
-    onClick={() => {
-      if (window.confirm("Deseja apagar todos os itens salvos no navegador?")) {
-        setItens([]);
-        localStorage.removeItem(STORAGE_KEY_ITEMS);
-      }
-    }}
-  >
-    Limpar itens salvos
-  </button>
-</div>
+    
                 onClick={() => {
                   if (window.confirm("Deseja apagar todos os itens salvos no navegador?")) {
                     setItens([]);
