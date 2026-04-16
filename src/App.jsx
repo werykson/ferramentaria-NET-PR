@@ -85,10 +85,6 @@ export default function App() {
   link.click();
 };
 
-  <button onClick={exportarCSV}>
-  Exportar CSV
-</button>
-  
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(itens));
   }, [itens]);
@@ -306,12 +302,27 @@ export default function App() {
               </div>
             </div>
 
-            <div style={styles.actionRow}>
-              <button style={styles.primaryButtonInline} onClick={cadastrarItem}>
-                Cadastrar item
-              </button>
-              <button
-                style={styles.secondaryButtonInline}
+           <div style={styles.actionRow}>
+  <button style={styles.primaryButtonInline} onClick={cadastrarItem}>
+    Cadastrar item
+  </button>
+
+  <button style={styles.primaryButtonInline} onClick={exportarCSV}>
+    Exportar CSV
+  </button>
+
+  <button
+    style={styles.secondaryButtonInline}
+    onClick={() => {
+      if (window.confirm("Deseja apagar todos os itens salvos no navegador?")) {
+        setItens([]);
+        localStorage.removeItem(STORAGE_KEY_ITEMS);
+      }
+    }}
+  >
+    Limpar itens salvos
+  </button>
+</div>
                 onClick={() => {
                   if (window.confirm("Deseja apagar todos os itens salvos no navegador?")) {
                     setItens([]);
