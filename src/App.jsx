@@ -50,6 +50,41 @@ export default function App() {
     minimos: emptyMinimos(),
   });
 
+  const exportarCSV = () => {
+  if (itens.length === 0) {
+    alert("Nenhum item para exportar");
+    return;
+  }
+
+  const headers = [
+    "codigo",
+    "nome",
+    "valor",
+    "qtdKit",
+    "minimos"
+  ];
+
+  const rows = itens.map(item => [
+    item.codigo,
+    item.nome,
+    item.valor,
+    item.qtdKit,
+    JSON.stringify(item.minimos || {})
+  ]);
+
+  const csvContent =
+    [headers, ...rows]
+      .map(e => e.join(";"))
+      .join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "itens.csv";
+  link.click();
+};
+  
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(itens));
   }, [itens]);
