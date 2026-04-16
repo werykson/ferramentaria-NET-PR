@@ -18,9 +18,33 @@ const MENU = [
   { key: "usuarios", label: "Usuários" },
 ];
 
-const emptyMinimos = () => Object.fromEntries(CCS.map((cc) => [cc, ""]));
 const STORAGE_KEY_ITEMS = "ferramentaria_net_pr_itens";
 const STORAGE_KEY_AUTH = "ferramentaria_net_pr_auth";
+
+const emptyMinimos = () => Object.fromEntries(CCS.map((cc) => [cc, ""]));
+
+const normalizarMinimos = (minimos) => {
+  const base = Object.fromEntries(CCS.map((cc) => [cc, 0]));
+
+  if (!minimos || typeof minimos !== "object") {
+    return base;
+  }
+
+  CCS.forEach((cc) => {
+    base[cc] = Number(minimos[cc] || 0);
+  });
+
+  return base;
+};
+
+const normalizarItem = (item) => ({
+  id: item?.id ?? Date.now() + Math.random(),
+  codigo: String(item?.codigo ?? "").trim(),
+  nome: String(item?.nome ?? "").trim(),
+  valor: Number(item?.valor || 0),
+  qtdKit: Number(item?.qtdKit || 0),
+  minimos: normalizarMinimos(item?.minimos),
+});
 
 export default function App() {
   const [logado, setLogado] = useState(() => {
@@ -38,7 +62,12 @@ export default function App() {
   const [itens, setItens] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_ITEMS);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+
+      return parsed.map(normalizarItem);
     } catch {
       return [];
     }
@@ -53,7 +82,11 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(itens));
+    try {
+      localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(itens));
+    } catch {
+      // evita quebrar caso localStorage falhe
+    }
   }, [itens]);
 
   const login = () => {
@@ -89,18 +122,17 @@ export default function App() {
       return;
     }
 
-    const novoItem = {
+    const novoItem = normalizarItem({
       id: Date.now(),
-      codigo: itemForm.codigo.trim(),
-      nome: itemForm.nome.trim(),
-      valor: Number(itemForm.valor || 0),
-      qtdKit: Number(itemForm.qtdKit || 0),
-      minimos: Object.fromEntries(
-        CCS.map((cc) => [cc, Number(itemForm.minimos[cc] || 0)])
-      ),
-    };
+      codigo: itemForm.codigo,
+      nome: itemForm.nome,
+      valor: itemForm.valor,
+      qtdKit: itemForm.qtdKit,
+      minimos: itemForm.minimos,
+    });
 
     setItens((prev) => [...prev, novoItem]);
+
     setItemForm({
       codigo: "",
       nome: "",
@@ -120,14 +152,20 @@ export default function App() {
       return;
     }
 
-    const headers = ["codigo", "nome", "valor", "qtdKit", "minimos"];
+    const headers = [
+      "codigo",
+      "nome",
+      "valor",
+      "qtdKit",
+      ...CCS,
+    ];
 
     const rows = itens.map((item) => [
       item.codigo,
       item.nome,
       item.valor,
       item.qtdKit,
-      JSON.stringify(item.minimos || {}),
+      ...CCS.map((cc) => item.minimos?.[cc] ?? 0),
     ]);
 
     const csvContent = [headers, ...rows]
@@ -142,6 +180,7 @@ export default function App() {
     link.href = URL.createObjectURL(blob);
     link.download = "itens.csv";
     link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const baixarModeloCSV = () => {
@@ -150,12 +189,7 @@ export default function App() {
       "nome",
       "valor",
       "qtdKit",
-      "CC NET APOIO PR",
-      "CC NET CTA PR",
-      "CC NET LDA PR",
-      "CC NET MGA PR",
-      "CC NET LITORAL PR",
-      "CC NET SUDOESTE PR",
+      ...CCS,
     ];
 
     const exemplo = [
@@ -183,6 +217,7 @@ export default function App() {
     link.href = URL.createObjectURL(blob);
     link.download = "modelo_itens.csv";
     link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const importarCSV = (event) => {
@@ -208,27 +243,22 @@ export default function App() {
 
       const novosItens = linhas.slice(1).map((linha) => {
         const colunas = linha.split(";");
-
         const registro = {};
+
         headers.forEach((header, index) => {
           registro[header] = (colunas[index] || "").trim();
         });
 
-        return {
+        return normalizarItem({
           id: Date.now() + Math.random(),
-          codigo: registro["codigo"] || "",
-          nome: registro["nome"] || "",
-          valor: Number(registro["valor"] || 0),
-          qtdKit: Number(registro["qtdKit"] || 0),
-          minimos: {
-            "CC NET APOIO PR": Number(registro["CC NET APOIO PR"] || 0),
-            "CC NET CTA PR": Number(registro["CC NET CTA PR"] || 0),
-            "CC NET LDA PR": Number(registro["CC NET LDA PR"] || 0),
-            "CC NET MGA PR": Number(registro["CC NET MGA PR"] || 0),
-            "CC NET LITORAL PR": Number(registro["CC NET LITORAL PR"] || 0),
-            "CC NET SUDOESTE PR": Number(registro["CC NET SUDOESTE PR"] || 0),
-          },
-        };
+          codigo: registro["codigo"],
+          nome: registro["nome"],
+          valor: registro["valor"],
+          qtdKit: registro["qtdKit"],
+          minimos: Object.fromEntries(
+            CCS.map((cc) => [cc, registro[cc] || 0])
+          ),
+        });
       });
 
       const itensValidos = novosItens.filter(
@@ -247,7 +277,7 @@ export default function App() {
   const totalTecnicos = 0;
 
   const kitsHoje = useMemo(() => {
-    const itensComKit = itens.filter((item) => item.qtdKit > 0);
+    const itensComKit = itens.filter((item) => Number(item.qtdKit) > 0);
     if (!itensComKit.length) return 0;
     return 0;
   }, [itens]);
@@ -465,13 +495,15 @@ export default function App() {
                       <tr key={item.id}>
                         <td style={styles.td}>{item.codigo}</td>
                         <td style={styles.td}>{item.nome}</td>
-                        <td style={styles.td}>R$ {item.valor.toFixed(2)}</td>
-                        <td style={styles.td}>{item.qtdKit}</td>
+                        <td style={styles.td}>
+                          R$ {Number(item.valor || 0).toFixed(2)}
+                        </td>
+                        <td style={styles.td}>{Number(item.qtdKit || 0)}</td>
                         <td style={styles.td}>
                           <div style={styles.minimosLista}>
                             {CCS.map((cc) => (
                               <div key={cc} style={styles.minimoLinha}>
-                                <strong>{cc}:</strong> {item.minimos[cc] || 0}
+                                <strong>{cc}:</strong> {item.minimos?.[cc] ?? 0}
                               </div>
                             ))}
                           </div>
