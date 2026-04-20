@@ -52,12 +52,32 @@ create table if not exists public.movimentacoes (
 create index if not exists idx_movimentacoes_created_at on public.movimentacoes (created_at desc);
 create index if not exists idx_movimentacoes_cc on public.movimentacoes (cc);
 
+-- ========== TRIANGULAÇÕES (solicitações entre CCs) ==========
+create table if not exists public.triangulacoes (
+  id text primary key,
+  cc_origem text not null,
+  cc_destino text not null,
+  item_id bigint not null,
+  quantidade numeric not null default 0,
+  observacao text,
+  solicitado_por text,
+  solicitado_nome text,
+  status text not null default 'Pendente',
+  aprovado_por text,
+  aprovado_nome text,
+  approved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_triangulacoes_created_at on public.triangulacoes (created_at desc);
+create index if not exists idx_triangulacoes_status on public.triangulacoes (status);
+
 -- ========== Acesso rápido (app usa anon key no front) ==========
 -- Em produção depois você pode reativar RLS com políticas específicas.
 alter table public.usuarios disable row level security;
 alter table public.itens disable row level security;
 alter table public.tecnicos disable row level security;
 alter table public.movimentacoes disable row level security;
+alter table public.triangulacoes disable row level security;
 
 -- ========== Admin inicial (ajuste a senha depois no app) ==========
 insert into public.usuarios

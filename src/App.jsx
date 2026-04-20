@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "./supabaseClient";
+import { theme } from "./theme.js";
+import { captureException } from "./telemetry.js";
 
 const CCS = [
   "CC NET APOIO PR",
@@ -216,8 +218,41 @@ function loadTriangulacoes() {
   return safeLocalStorageGet(STORAGE_KEY_TRI, []);
 }
 
-function saveTriangulacoes(lista) {
-  safeLocalStorageSet(STORAGE_KEY_TRI, lista);
+function triRegistroFromDbRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    cc_origem: row.cc_origem,
+    cc_destino: row.cc_destino,
+    item_id: row.item_id,
+    quantidade: row.quantidade,
+    observacao: row.observacao || "",
+    solicitado_por: row.solicitado_por || "-",
+    solicitado_nome: row.solicitado_nome || "-",
+    status: row.status,
+    aprovado_por: row.aprovado_por || null,
+    aprovado_nome: row.aprovado_nome || null,
+    approved_at: row.approved_at || null,
+    created_at: row.created_at,
+  };
+}
+
+function triRegistroToDbRow(t) {
+  return {
+    id: t.id,
+    cc_origem: t.cc_origem,
+    cc_destino: t.cc_destino,
+    item_id: Number(t.item_id),
+    quantidade: Number(t.quantidade),
+    observacao: t.observacao?.trim() || null,
+    solicitado_por: t.solicitado_por || null,
+    solicitado_nome: t.solicitado_nome || null,
+    status: t.status || "Pendente",
+    aprovado_por: t.aprovado_por || null,
+    aprovado_nome: t.aprovado_nome || null,
+    approved_at: t.approved_at || null,
+    created_at: t.created_at || new Date().toISOString(),
+  };
 }
 
 function formatMoney(value) {
@@ -340,6 +375,10 @@ function getSupabaseErrorMessage(error, fallback) {
     return "Falha de conexão com o banco (rede/timeout). Verifique internet, firewall/proxy e tente novamente.";
   }
 
+  if (normalized.includes("42p01") || normalized.includes("does not exist")) {
+    return "Tabela ou coluna ausente no banco. Rode as migrações SQL mais recentes no Supabase e tente de novo.";
+  }
+
   return raw || fallback;
 }
 
@@ -395,8 +434,15 @@ export default function App() {
   const [movForm, setMovForm] = useState(emptyMovForm);
   const [loteMovimentacoes, setLoteMovimentacoes] = useState([]);
 
-  const [triangulacoes, setTriangulacoes] = useState(() => loadTriangulacoes());
+  const [triangulacoes, setTriangulacoes] = useState([]);
   const [triForm, setTriForm] = useState(emptyTriForm);
+  const [toasts, setToasts] = useState([]);
+
+  const notify = useCallback((message, variant = "info") => {
+    const id = uid();
+    setToasts((prev) => [...prev, { id, message, variant }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
+  }, []);
 
   const [estoqueFiltro, setEstoqueFiltro] = useState({ cc: "", tecnico_id: "", item_id: "" });
 
@@ -411,10 +457,6 @@ export default function App() {
   });
   const [usuarioExpandidoId, setUsuarioExpandidoId] = useState(null);
   const [buscaUsuario, setBuscaUsuario] = useState("");
-
-  useEffect(() => {
-    saveTriangulacoes(triangulacoes);
-  }, [triangulacoes]);
 
   useEffect(() => {
     if (pagina === "usuarios" && !roleCanManageUsers(usuarioAtual)) {
@@ -583,11 +625,64 @@ export default function App() {
     setMovimentacoes(data || []);
   };
 
+  const buscarTriangulacoes = async () => {
+    let data = null;
+    let error = null;
+    try {
+      const resultado = await withQueryTimeout(
+        supabase.from("triangulacoes").select("*").order("created_at", { ascending: false }),
+        "buscar triangulações"
+      );
+      data = resultado?.data ?? null;
+      error = resultado?.error ?? null;
+    } catch (err) {
+      error = err;
+    }
+    if (error) {
+      console.error(error);
+      captureException(error, { op: "buscarTriangulacoes" });
+      setTriangulacoes([]);
+      notify(
+        getSupabaseErrorMessage(
+          error,
+          "Não foi possível carregar triangulações. Rode sql_migration_triangulacoes.sql no Supabase se ainda não rodou."
+        ),
+        "error"
+      );
+      return;
+    }
+    let list = (data || []).map(triRegistroFromDbRow).filter(Boolean);
+    const legado = loadTriangulacoes();
+    if (legado.length > 0) {
+      const dbIds = new Set(list.map((t) => t.id));
+      const migrar = legado.filter((t) => t.id && !dbIds.has(t.id));
+      if (migrar.length > 0) {
+        const { error: insErr } = await supabase
+          .from("triangulacoes")
+          .insert(migrar.map((t) => triRegistroToDbRow(t)));
+        if (!insErr) {
+          safeLocalStorageSet(STORAGE_KEY_TRI, []);
+          try {
+            const r2 = await withQueryTimeout(
+              supabase.from("triangulacoes").select("*").order("created_at", { ascending: false }),
+              "recarregar triangulações"
+            );
+            if (!r2.error && r2.data) list = r2.data.map(triRegistroFromDbRow).filter(Boolean);
+          } catch {
+            /* noop */
+          }
+          notify(`${migrar.length} triangulação(ões) migradas do navegador para o banco.`, "success");
+        }
+      }
+    }
+    setTriangulacoes(list);
+  };
+
   const carregarTudo = async () => {
     setCarregando(true);
     setCarregandoMovimentacoes(true);
     try {
-      await Promise.allSettled([buscarItens(), buscarTecnicos()]);
+      await Promise.allSettled([buscarItens(), buscarTecnicos(), buscarTriangulacoes()]);
     } finally {
       setCarregando(false);
     }
@@ -1073,7 +1168,7 @@ export default function App() {
 
   const importarItensExcel = async (event) => {
     if (!roleCanManageItems(usuarioAtual)) {
-      alert("Seu perfil não pode importar itens.");
+      notify("Seu perfil não pode importar itens.", "error");
       return;
     }
     const arquivo = event.target.files?.[0];
@@ -1092,8 +1187,9 @@ export default function App() {
       const possuiCodigo = headers.has(normalizeHeaderKey(ITEM_HEADER_CODIGO));
       const possuiNome = headers.has(normalizeHeaderKey(ITEM_HEADER_NOME));
       if (!possuiCodigo || !possuiNome) {
-        alert(
-          "Planilha fora do padrão. Use o modelo de itens (colunas obrigatórias: CODIGO e NOME)."
+        notify(
+          "Planilha fora do padrão. Use o modelo de itens (colunas obrigatórias: CODIGO e NOME).",
+          "error"
         );
         return;
       }
@@ -1138,17 +1234,52 @@ export default function App() {
         });
 
       if (!payload.length) {
-        alert("Nenhuma linha válida encontrada na planilha.");
+        notify("Nenhuma linha válida encontrada na planilha.", "error");
         return;
       }
 
-      const { error } = await supabase.from("itens").insert(payload);
-      if (error) throw error;
+      const porCodigo = new Map();
+      for (const row of payload) {
+        porCodigo.set(row.codigo, row);
+      }
+      const unicos = [...porCodigo.values()];
+      const codigos = unicos.map((r) => r.codigo);
+      const { data: existentes, error: selErr } = await supabase
+        .from("itens")
+        .select("id,codigo")
+        .in("codigo", codigos);
+      if (selErr) throw selErr;
+      const idPorCodigo = Object.fromEntries((existentes || []).map((r) => [r.codigo, r.id]));
+      const inserir = [];
+      const atualizar = [];
+      for (const row of unicos) {
+        const reg = {
+          codigo: row.codigo,
+          nome: row.nome,
+          valor: row.valor,
+          qtd_kit_mdu: row.qtd_kit_mdu,
+          qtd_kit_inst: row.qtd_kit_inst,
+          minimos: row.minimos,
+        };
+        const id = idPorCodigo[row.codigo];
+        if (id) atualizar.push({ id, ...reg });
+        else inserir.push(reg);
+      }
+      for (const row of atualizar) {
+        const { id, ...rest } = row;
+        const { error: upErr } = await supabase.from("itens").update(rest).eq("id", id);
+        if (upErr) throw upErr;
+      }
+      if (inserir.length) {
+        const { error: insErr } = await supabase.from("itens").insert(inserir);
+        if (insErr) throw insErr;
+      }
       await buscarItens();
-      alert(`${payload.length} item(ns) importado(s) com sucesso.`);
+      notify(`${atualizar.length} item(ns) atualizado(s), ${inserir.length} novo(s).`, "success");
     } catch (error) {
       console.error(error);
-      alert("Erro ao importar planilha de itens.");
+      captureException(error, { op: "importarItensExcel" });
+      notify(getSupabaseErrorMessage(error, "Erro ao importar planilha de itens."), "error");
     }
   };
 
@@ -1336,7 +1467,7 @@ export default function App() {
   const adicionarAoLote = () => {
     const erro = validarLinhaMovimentacao(movForm);
     if (erro) {
-      alert(erro);
+      notify(erro, "error");
       return;
     }
 
@@ -1350,7 +1481,7 @@ export default function App() {
 
   const salvarLoteMovimentacoes = async () => {
     if (!loteMovimentacoes.length) {
-      alert("Adicione ao menos uma linha no lote antes de salvar.");
+      notify("Adicione ao menos uma linha no lote antes de salvar.", "error");
       return;
     }
 
@@ -1380,31 +1511,32 @@ export default function App() {
     const { error } = await supabase.from("movimentacoes").insert(payload);
     if (error) {
       console.error(error);
-      alert("Erro ao salvar movimentações.");
+      captureException(error, { op: "salvarLoteMovimentacoes" });
+      notify(getSupabaseErrorMessage(error, "Erro ao salvar movimentações."), "error");
       return;
     }
 
     await buscarMovimentacoes();
     setLoteMovimentacoes([]);
     setMovForm(emptyMovForm());
-    alert("Movimentações salvas com sucesso.");
+    notify("Movimentações salvas com sucesso.", "success");
   };
 
-  const solicitarTriangulacao = () => {
+  const solicitarTriangulacao = async () => {
     if (!canRequestTriangulacao(usuarioAtual)) {
-      alert("Seu usuário não possui permissão para solicitar triangulação.");
+      notify("Seu usuário não possui permissão para solicitar triangulação.", "error");
       return;
     }
     if (!triForm.cc_origem || !triForm.cc_destino || !triForm.item_id || !triForm.quantidade) {
-      alert("Preencha origem, destino, item e quantidade.");
+      notify("Preencha origem, destino, item e quantidade.", "error");
       return;
     }
     if (triForm.cc_origem === triForm.cc_destino) {
-      alert("Origem e destino não podem ser iguais.");
+      notify("Origem e destino não podem ser iguais.", "error");
       return;
     }
     if (!roleCanManageCC(usuarioAtual, triForm.cc_origem)) {
-      alert("Seu perfil não pode solicitar triangulação a partir desse CC.");
+      notify("Seu perfil não pode solicitar triangulação a partir desse CC.", "error");
       return;
     }
 
@@ -1412,11 +1544,11 @@ export default function App() {
     const itemId = Number(triForm.item_id);
     const saldoAtual = Number(saldoEstoqueCCItem[`${triForm.cc_origem}-${itemId}`] || 0);
     if (quantidade <= 0) {
-      alert("Informe uma quantidade válida.");
+      notify("Informe uma quantidade válida.", "error");
       return;
     }
     if (quantidade > saldoAtual) {
-      alert(`Saldo insuficiente na origem. Saldo atual: ${saldoAtual}.`);
+      notify(`Saldo insuficiente na origem. Saldo atual: ${saldoAtual}.`, "error");
       return;
     }
 
@@ -1433,20 +1565,27 @@ export default function App() {
       created_at: new Date().toISOString(),
     };
 
-    setTriangulacoes((prev) => [registro, ...prev]);
+    const { error } = await supabase.from("triangulacoes").insert([triRegistroToDbRow(registro)]);
+    if (error) {
+      console.error(error);
+      captureException(error, { op: "solicitarTriangulacao" });
+      notify(getSupabaseErrorMessage(error, "Erro ao registrar triangulação."), "error");
+      return;
+    }
     setTriForm(emptyTriForm());
-    alert("Triangulação solicitada com sucesso. Ela precisa ser aprovada antes de entrar no estoque.");
+    await buscarTriangulacoes();
+    notify("Triangulação solicitada. Aguarde aprovação para movimentar o estoque.", "success");
   };
 
   const aprovarTriangulacao = async (tri) => {
     if (!roleCanApproveTriangulacao(usuarioAtual, tri.cc_origem, tri.cc_destino)) {
-      alert("Seu perfil não pode aprovar essa triangulação.");
+      notify("Seu perfil não pode aprovar essa triangulação.", "error");
       return;
     }
 
     const saldoAtual = Number(saldoEstoqueCCItem[`${tri.cc_origem}-${tri.item_id}`] || 0);
     if (Number(tri.quantidade) > saldoAtual) {
-      alert(`Saldo insuficiente na origem no momento da aprovação. Saldo atual: ${saldoAtual}.`);
+      notify(`Saldo insuficiente na origem no momento da aprovação. Saldo atual: ${saldoAtual}.`, "error");
       return;
     }
 
@@ -1472,44 +1611,55 @@ export default function App() {
     const { error } = await supabase.from("movimentacoes").insert(payload);
     if (error) {
       console.error(error);
-      alert("Erro ao aprovar triangulação.");
+      captureException(error, { op: "aprovarTriangulacao_mov" });
+      notify(getSupabaseErrorMessage(error, "Erro ao aprovar triangulação (movimentações)."), "error");
       return;
     }
 
-    setTriangulacoes((prev) =>
-      prev.map((item) =>
-        item.id === tri.id
-          ? {
-              ...item,
-              status: "Aprovada",
-              aprovado_por: usuarioAtual?.usuario || "-",
-              aprovado_nome: usuarioAtual?.nome || "-",
-              approved_at: new Date().toISOString(),
-            }
-          : item
-      )
-    );
+    const { error: updErr } = await supabase
+      .from("triangulacoes")
+      .update({
+        status: "Aprovada",
+        aprovado_por: usuarioAtual?.usuario || "-",
+        aprovado_nome: usuarioAtual?.nome || "-",
+        approved_at: new Date().toISOString(),
+      })
+      .eq("id", tri.id);
+    if (updErr) {
+      console.error(updErr);
+      captureException(updErr, { op: "aprovarTriangulacao_update", tri_id: tri.id });
+      notify(
+        "Movimentações gravadas, mas falhou ao atualizar o status da solicitação. Informe o suporte.",
+        "error"
+      );
+    } else {
+      notify("Triangulação aprovada.", "success");
+    }
+    await buscarTriangulacoes();
     await buscarMovimentacoes();
   };
 
-  const reprovarTriangulacao = (tri) => {
+  const reprovarTriangulacao = async (tri) => {
     if (!roleCanApproveTriangulacao(usuarioAtual, tri.cc_origem, tri.cc_destino)) {
-      alert("Seu perfil não pode reprovar essa triangulação.");
+      notify("Seu perfil não pode reprovar essa triangulação.", "error");
       return;
     }
-    setTriangulacoes((prev) =>
-      prev.map((item) =>
-        item.id === tri.id
-          ? {
-              ...item,
-              status: "Reprovada",
-              aprovado_por: usuarioAtual?.usuario || "-",
-              aprovado_nome: usuarioAtual?.nome || "-",
-              approved_at: new Date().toISOString(),
-            }
-          : item
-      )
-    );
+    const { error } = await supabase
+      .from("triangulacoes")
+      .update({
+        status: "Reprovada",
+        aprovado_por: usuarioAtual?.usuario || "-",
+        aprovado_nome: usuarioAtual?.nome || "-",
+        approved_at: new Date().toISOString(),
+      })
+      .eq("id", tri.id);
+    if (error) {
+      console.error(error);
+      notify(getSupabaseErrorMessage(error, "Erro ao reprovar triangulação."), "error");
+      return;
+    }
+    await buscarTriangulacoes();
+    notify("Triangulação reprovada.", "success");
   };
 
   const cadastrarUsuario = async () => {
@@ -1861,7 +2011,9 @@ export default function App() {
 
   if (!usuarioAtual) {
     return (
-      <div style={styles.loginBg}>
+      <>
+        <ToastStack toasts={toasts} />
+        <div style={styles.loginBg}>
         <form
           style={styles.loginCard}
           onSubmit={(e) => {
@@ -1886,17 +2038,23 @@ export default function App() {
           <p style={styles.loginText}>Entre com seu usuário para acessar o painel.</p>
           {erroUsuarios && <p style={styles.warningText}>{erroUsuarios}</p>}
           {carregandoUsuarios && <p style={styles.mutedText}>Carregando usuários...</p>}
-          <label style={styles.label}>Usuário</label>
+          <label style={styles.label} htmlFor="login-usuario">Usuário</label>
           <input
+            id="login-usuario"
             style={styles.input}
+            name="usuario"
+            autoComplete="username"
             value={usuarioLogin}
             onChange={(e) => setUsuarioLogin(e.target.value)}
             placeholder="Digite seu usuário"
           />
-          <label style={styles.label}>Senha</label>
+          <label style={styles.label} htmlFor="login-senha">Senha</label>
           <input
+            id="login-senha"
             style={styles.input}
+            name="password"
             type="password"
+            autoComplete="current-password"
             value={senhaLogin}
             onChange={(e) => setSenhaLogin(e.target.value)}
             placeholder="Digite sua senha"
@@ -1905,12 +2063,15 @@ export default function App() {
           <p style={styles.loginHint}>Agora também dá para entrar apertando Enter.</p>
         </form>
       </div>
+      </>
     );
   }
 
   if (usuarioAtual?.mustChangePassword) {
     return (
-      <div style={styles.loginBg}>
+      <>
+        <ToastStack toasts={toasts} />
+        <div style={styles.loginBg}>
         <form
           style={styles.loginCard}
           onSubmit={(e) => {
@@ -1935,18 +2096,22 @@ export default function App() {
           <p style={styles.loginText}>
             Por segurança, você precisa alterar a senha padrão antes de acessar os módulos.
           </p>
-          <label style={styles.label}>Nova senha</label>
+          <label style={styles.label} htmlFor="primeiro-acesso-senha">Nova senha</label>
           <input
+            id="primeiro-acesso-senha"
             style={styles.input}
             type="password"
+            autoComplete="new-password"
             value={novaSenhaObrigatoria}
             onChange={(e) => setNovaSenhaObrigatoria(e.target.value)}
             placeholder="Digite sua nova senha"
           />
-          <label style={styles.label}>Confirmar nova senha</label>
+          <label style={styles.label} htmlFor="primeiro-acesso-confirma">Confirmar nova senha</label>
           <input
+            id="primeiro-acesso-confirma"
             style={styles.input}
             type="password"
+            autoComplete="new-password"
             value={confirmarSenhaObrigatoria}
             onChange={(e) => setConfirmarSenhaObrigatoria(e.target.value)}
             placeholder="Repita sua nova senha"
@@ -1954,10 +2119,13 @@ export default function App() {
           <button type="submit" style={styles.primaryButton}>Salvar nova senha</button>
         </form>
       </div>
+      </>
     );
   }
 
   return (
+    <>
+      <ToastStack toasts={toasts} />
     <div style={styles.appShell}>
       <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
@@ -2652,20 +2820,48 @@ export default function App() {
               ) : (
                 <>
                   <div style={styles.formGrid}>
-                    <select style={styles.input} value={triForm.cc_origem} onChange={(e) => setTriForm({ ...triForm, cc_origem: e.target.value })}>
+                    <select
+                      style={styles.input}
+                      aria-label="Centro de custo de origem da triangulação"
+                      value={triForm.cc_origem}
+                      onChange={(e) => setTriForm({ ...triForm, cc_origem: e.target.value })}
+                    >
                       <option value="">CC de origem</option>
                       {CCS.filter((cc) => roleCanManageCC(usuarioAtual, cc)).map((cc) => <option key={cc} value={cc}>{cc}</option>)}
                     </select>
-                    <select style={styles.input} value={triForm.cc_destino} onChange={(e) => setTriForm({ ...triForm, cc_destino: e.target.value })}>
+                    <select
+                      style={styles.input}
+                      aria-label="Centro de custo de destino da triangulação"
+                      value={triForm.cc_destino}
+                      onChange={(e) => setTriForm({ ...triForm, cc_destino: e.target.value })}
+                    >
                       <option value="">CC de destino</option>
                       {CCS.filter((cc) => roleCanViewCC(usuarioAtual, cc)).map((cc) => <option key={cc} value={cc}>{cc}</option>)}
                     </select>
-                    <select style={styles.input} value={triForm.item_id} onChange={(e) => setTriForm({ ...triForm, item_id: e.target.value })}>
+                    <select
+                      style={styles.input}
+                      aria-label="Item a transferir na triangulação"
+                      value={triForm.item_id}
+                      onChange={(e) => setTriForm({ ...triForm, item_id: e.target.value })}
+                    >
                       <option value="">Selecione o item</option>
                       {itens.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
                     </select>
-                    <input style={styles.input} type="number" placeholder="Quantidade" value={triForm.quantidade} onChange={(e) => setTriForm({ ...triForm, quantidade: e.target.value })} />
-                    <input style={{ ...styles.input, gridColumn: "1 / -1" }} placeholder="Observação" value={triForm.observacao} onChange={(e) => setTriForm({ ...triForm, observacao: e.target.value })} />
+                    <input
+                      style={styles.input}
+                      type="number"
+                      aria-label="Quantidade da triangulação"
+                      placeholder="Quantidade"
+                      value={triForm.quantidade}
+                      onChange={(e) => setTriForm({ ...triForm, quantidade: e.target.value })}
+                    />
+                    <input
+                      style={{ ...styles.input, gridColumn: "1 / -1" }}
+                      aria-label="Observação da triangulação"
+                      placeholder="Observação"
+                      value={triForm.observacao}
+                      onChange={(e) => setTriForm({ ...triForm, observacao: e.target.value })}
+                    />
                   </div>
                   <button
                     style={{
@@ -3088,6 +3284,56 @@ export default function App() {
         )}
       </main>
     </div>
+    </>
+  );
+}
+
+function ToastStack({ toasts }) {
+  if (!toasts?.length) return null;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 16,
+        right: 16,
+        zIndex: 9999,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        maxWidth: 420,
+        pointerEvents: "none",
+      }}
+      role="region"
+      aria-label="Notificações do sistema"
+    >
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          role="status"
+          aria-live="polite"
+          style={{
+            pointerEvents: "auto",
+            padding: "12px 16px",
+            borderRadius: theme.radius.md,
+            background:
+              t.variant === "error"
+                ? "#fef2f2"
+                : t.variant === "success"
+                  ? "#f0fdf4"
+                  : "#eff6ff",
+            border: `1px solid ${
+              t.variant === "error" ? "#fecaca" : t.variant === "success" ? "#bbf7d0" : "#bfdbfe"
+            }`,
+            color: theme.colors.slate900,
+            fontSize: 14,
+            fontFamily: theme.fontStack,
+            boxShadow: theme.shadow.soft,
+          }}
+        >
+          {t.message}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -3278,7 +3524,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
-    fontFamily: "Arial, sans-serif",
+    fontFamily: theme.fontStack,
   },
   loginCard: {
     width: "100%",
@@ -3366,7 +3612,7 @@ const styles = {
   },
   actionRow: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" },
   loginHint: { marginTop: 16, fontSize: 12, color: "#64748b" },
-  appShell: { minHeight: "100vh", display: "flex", background: "#eef2ff", fontFamily: "Arial, sans-serif" },
+  appShell: { minHeight: "100vh", display: "flex", background: theme.colors.surface, fontFamily: theme.fontStack },
   sidebar: { width: 280, background: "linear-gradient(180deg, #0b1220 0%, #111827 100%)", color: "#ffffff", padding: 24, boxSizing: "border-box", boxShadow: "8px 0 30px rgba(15,23,42,0.18)", position: "sticky", top: 0, height: "100vh", overflowY: "auto" },
   sidebarHeader: { fontSize: 23, fontWeight: 700, marginBottom: 18, lineHeight: 1.15, display: "flex", flexDirection: "column", gap: 10 },
   sidebarLogo: { width: 100, height: 44, objectFit: "contain", borderRadius: 6, background: "#ffffff", padding: "4px 6px" },
