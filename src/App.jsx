@@ -400,6 +400,7 @@ export default function App() {
     permissions: getDefaultPermissions("Gerente"),
   });
   const [usuarioExpandidoId, setUsuarioExpandidoId] = useState(null);
+  const [buscaUsuario, setBuscaUsuario] = useState("");
 
   useEffect(() => {
     saveTriangulacoes(triangulacoes);
@@ -1572,7 +1573,19 @@ export default function App() {
     );
   };
 
-  const usuariosVisiveis = useMemo(() => usuariosSistema.map((user) => normalizeUser(user)), [usuariosSistema]);
+  const usuariosVisiveis = useMemo(
+    () => usuariosSistema.map((user) => normalizeUser(user)),
+    [usuariosSistema]
+  );
+  const usuariosFiltrados = useMemo(() => {
+    const termo = String(buscaUsuario || "").trim().toLowerCase();
+    if (!termo) return usuariosVisiveis;
+    return usuariosVisiveis.filter((user) => {
+      const nome = String(user?.nome || "").toLowerCase();
+      const login = String(user?.usuario || "").toLowerCase();
+      return nome.includes(termo) || login.includes(termo);
+    });
+  }, [usuariosVisiveis, buscaUsuario]);
 
   const tecnicosVisiveis = useMemo(
     () => tecnicos.filter((tec) => roleCanViewCC(usuarioAtual, tec.cc)),
@@ -2504,8 +2517,22 @@ export default function App() {
                   Se a senha ficar em branco, o usuário será criado com senha padrão e será obrigado a trocar no primeiro acesso.
                 </p>
 
+            <div style={styles.sectionMini}>
+              <input
+                style={styles.input}
+                placeholder="Buscar usuário por nome ou login"
+                value={buscaUsuario}
+                onChange={(e) => setBuscaUsuario(e.target.value)}
+              />
+            </div>
+
             <div style={styles.userCardsGrid}>
-              {usuariosVisiveis.map((user) => {
+              {usuariosFiltrados.length === 0 ? (
+                <div style={styles.sectionMini}>
+                  Nenhum usuário encontrado para o filtro informado.
+                </div>
+              ) : (
+                usuariosFiltrados.map((user) => {
                 const expandido = usuarioExpandidoId === user.id;
                 return (
                   <div key={user.id} style={styles.userCard}>
@@ -2624,7 +2651,8 @@ export default function App() {
                     )}
                   </div>
                 );
-              })}
+              })
+              )}
             </div>
 
             <div style={styles.sectionMini}>
