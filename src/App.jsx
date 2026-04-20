@@ -380,6 +380,9 @@ export default function App() {
 
   const [tecnicos, setTecnicos] = useState([]);
   const [tecnicoForm, setTecnicoForm] = useState(emptyTecnicoForm);
+  const [buscaTecnico, setBuscaTecnico] = useState("");
+  const [tecnicoEditandoId, setTecnicoEditandoId] = useState(null);
+  const [tecnicoEdicaoDraft, setTecnicoEdicaoDraft] = useState({ nome: "", cc: "" });
 
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [movForm, setMovForm] = useState(emptyMovForm);
@@ -1065,6 +1068,35 @@ export default function App() {
     await buscarTecnicos();
   };
 
+  const salvarEdicaoTecnico = async () => {
+    if (!tecnicoEditandoId) return;
+    const alvo = tecnicosById[Number(tecnicoEditandoId)];
+    if (!alvo) return;
+    if (!roleCanCreateCadastrosTecnicos(usuarioAtual, alvo.cc)) {
+      alert("Seu perfil não pode editar este técnico.");
+      return;
+    }
+    const nome = String(tecnicoEdicaoDraft.nome || "").trim();
+    const cc = String(tecnicoEdicaoDraft.cc || "").trim();
+    if (!nome || !cc) {
+      alert("Preencha o nome e o centro de custo.");
+      return;
+    }
+    if (!roleCanCreateCadastrosTecnicos(usuarioAtual, cc)) {
+      alert("Seu perfil não pode atribuir técnicos ao CC selecionado.");
+      return;
+    }
+    const { error } = await supabase.from("tecnicos").update({ nome, cc }).eq("id", tecnicoEditandoId);
+    if (error) {
+      console.error(error);
+      alert(getSupabaseErrorMessage(error, "Erro ao atualizar técnico."));
+      return;
+    }
+    await buscarTecnicos();
+    setTecnicoEditandoId(null);
+    setTecnicoEdicaoDraft({ nome: "", cc: "" });
+  };
+
   const exportarTecnicosExcel = () => {
     const rows = tecnicos
       .filter((tec) => roleCanViewCC(usuarioAtual, tec.cc))
@@ -1591,6 +1623,20 @@ export default function App() {
     () => tecnicos.filter((tec) => roleCanViewCC(usuarioAtual, tec.cc)),
     [tecnicos, usuarioAtual]
   );
+
+  const tecnicosFiltrados = useMemo(() => {
+    const termo = String(buscaTecnico || "").trim().toLowerCase();
+    if (!termo) return tecnicosVisiveis;
+    return tecnicosVisiveis.filter((tec) => {
+      const nome = String(tec.nome || "").toLowerCase();
+      const cc = String(tec.cc || "").toLowerCase();
+      return nome.includes(termo) || cc.includes(termo);
+    });
+  }, [tecnicosVisiveis, buscaTecnico]);
+
+  useEffect(() => {
+    setTecnicoEditandoId(null);
+  }, [buscaTecnico]);
 
   const itensCriticosVisiveis = indicadoresDashboard.itensCriticos;
 
@@ -2122,6 +2168,15 @@ export default function App() {
               <p style={styles.mutedText}>Seu perfil pode apenas consultar técnicos do próprio CC.</p>
             )}
 
+            <div style={styles.sectionMini}>
+              <input
+                style={styles.input}
+                placeholder="Buscar técnico por nome ou centro de custo"
+                value={buscaTecnico}
+                onChange={(e) => setBuscaTecnico(e.target.value)}
+              />
+            </div>
+
             <div style={styles.tableWrap}>
               <table style={styles.table}>
                 <thead>
@@ -2134,18 +2189,75 @@ export default function App() {
                 <tbody>
                   {tecnicosVisiveis.length === 0 ? (
                     <tr><td style={styles.td} colSpan={3}>Nenhum técnico cadastrado.</td></tr>
+                  ) : tecnicosFiltrados.length === 0 ? (
+                    <tr><td style={styles.td} colSpan={3}>Nenhum técnico encontrado para o filtro informado.</td></tr>
                   ) : (
-                    tecnicosVisiveis.map((tec) => (
+                    tecnicosFiltrados.map((tec) => (
                       <tr key={tec.id}>
-                        <td style={styles.td}>{tec.nome}</td>
-                        <td style={styles.td}>{tec.cc}</td>
-                        <td style={styles.td}>
-                          {roleCanCreateCadastrosTecnicos(usuarioAtual, tec.cc) ? (
-                            <button style={styles.deleteButton} onClick={() => excluirTecnico(tec.id)}>Excluir</button>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
+                        {tecnicoEditandoId === tec.id ? (
+                          <>
+                            <td style={styles.td}>
+                              <input
+                                style={styles.input}
+                                value={tecnicoEdicaoDraft.nome}
+                                onChange={(e) => setTecnicoEdicaoDraft((d) => ({ ...d, nome: e.target.value }))}
+                              />
+                            </td>
+                            <td style={styles.td}>
+                              <select
+                                style={styles.input}
+                                value={tecnicoEdicaoDraft.cc}
+                                onChange={(e) => setTecnicoEdicaoDraft((d) => ({ ...d, cc: e.target.value }))}
+                              >
+                                <option value="">Selecione o centro de custo</option>
+                                {CCS.filter((cc) => roleCanManageCC(usuarioAtual, cc) || roleCanViewCC(usuarioAtual, cc)).map((cc) => (
+                                  <option key={cc} value={cc}>{cc}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td style={styles.td}>
+                              <div style={styles.actionRow}>
+                                <button type="button" style={styles.primaryButtonInline} onClick={salvarEdicaoTecnico}>
+                                  Salvar
+                                </button>
+                                <button
+                                  type="button"
+                                  style={styles.secondaryButtonInline}
+                                  onClick={() => {
+                                    setTecnicoEditandoId(null);
+                                    setTecnicoEdicaoDraft({ nome: "", cc: "" });
+                                  }}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={styles.td}>{tec.nome}</td>
+                            <td style={styles.td}>{tec.cc}</td>
+                            <td style={styles.td}>
+                              {roleCanCreateCadastrosTecnicos(usuarioAtual, tec.cc) ? (
+                                <div style={styles.actionRow}>
+                                  <button
+                                    type="button"
+                                    style={styles.secondaryButtonInline}
+                                    onClick={() => {
+                                      setTecnicoEditandoId(tec.id);
+                                      setTecnicoEdicaoDraft({ nome: tec.nome || "", cc: tec.cc || "" });
+                                    }}
+                                  >
+                                    Editar
+                                  </button>
+                                  <button style={styles.deleteButton} onClick={() => excluirTecnico(tec.id)}>Excluir</button>
+                                </div>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))
                   )}
