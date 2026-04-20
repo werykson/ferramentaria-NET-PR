@@ -77,7 +77,10 @@ function ccToHeaderToken(cc) {
 const ITEM_HEADER_CODIGO = "CODIGO";
 const ITEM_HEADER_NOME = "NOME";
 const ITEM_HEADER_VALOR = "VALOR";
+/** Legado: se existir sem as colunas MDU/INST, replica o valor nos dois kits. */
 const ITEM_HEADER_QTD_KIT = "QTD_KIT";
+const ITEM_HEADER_QTD_KIT_MDU = "QTD_KIT_MDU";
+const ITEM_HEADER_QTD_KIT_INST = "QTD_KIT_INST";
 const ITEM_MINIMO_HEADERS = CCS.map((cc) => ({
   cc,
   header: `MINIMO_${ccToHeaderToken(cc)}`,
@@ -91,7 +94,8 @@ const emptyItemForm = () => ({
   codigo: "",
   nome: "",
   valor: "",
-  qtdKit: "",
+  qtdKitMdu: "",
+  qtdKitInst: "",
   minimos: emptyMinimos(),
 });
 const emptyTecnicoForm = () => ({ nome: "", cc: "" });
@@ -520,12 +524,16 @@ export default function App() {
       return;
     }
     setItens(
-      (data || []).map((item) => ({
-        ...item,
-        valor: Number(item.valor || 0),
-        qtdKit: Number(item.qtd_kit || 0),
-        minimos: item.minimos || {},
-      }))
+      (data || []).map((item) => {
+        const legacy = Number(item.qtd_kit ?? 0);
+        return {
+          ...item,
+          valor: Number(item.valor || 0),
+          qtdKitMdu: Number(item.qtd_kit_mdu ?? legacy),
+          qtdKitInst: Number(item.qtd_kit_inst ?? legacy),
+          minimos: item.minimos || {},
+        };
+      })
     );
   };
 
@@ -808,10 +816,8 @@ export default function App() {
       top10ItensSubstituidos: rankingSubstituicoes.slice(0, 10),
       top10TecnicosSubstituidores: rankingSubstituicoesTecnicos.slice(0, 10),
       totalItens: itens.length,
-      totalKitsDisponiveis: (() => {
-        const itensComKit = itens.filter(
-          (item) => Number(item.qtd_kit ?? item.qtdKit ?? 0) > 0
-        );
+      totalKitsDisponiveisMdu: (() => {
+        const itensComKit = itens.filter((item) => Number(item.qtdKitMdu ?? 0) > 0);
         if (itensComKit.length === 0) return 0;
         const estoqueAlmoxarifadoPorCcItem = {};
         estoqueGeral.forEach((r) => {
@@ -819,17 +825,38 @@ export default function App() {
         });
         return CCS.filter((cc) => roleCanViewCC(usuarioAtual, cc)).reduce((sumCc, cc) => {
           const kitsPorItem = itensComKit.map((item) => {
-            const qtdKit = Number(item.qtd_kit ?? item.qtdKit ?? 0);
+            const qtd = Number(item.qtdKitMdu ?? 0);
             const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
-            return Math.floor(est / qtdKit);
+            return Math.floor(est / qtd);
           });
           return sumCc + Math.min(...kitsPorItem);
         }, 0);
       })(),
-      valorReferenciaKitsCadastro: itens.reduce((acc, item) => {
-        const qtdKit = Number(item.qtd_kit ?? item.qtdKit ?? 0);
-        if (qtdKit <= 0) return acc;
-        return acc + Number(item.valor || 0) * qtdKit;
+      totalKitsDisponiveisInst: (() => {
+        const itensComKit = itens.filter((item) => Number(item.qtdKitInst ?? 0) > 0);
+        if (itensComKit.length === 0) return 0;
+        const estoqueAlmoxarifadoPorCcItem = {};
+        estoqueGeral.forEach((r) => {
+          estoqueAlmoxarifadoPorCcItem[`${r.cc}-${Number(r.itemId)}`] = Number(r.estoque || 0);
+        });
+        return CCS.filter((cc) => roleCanViewCC(usuarioAtual, cc)).reduce((sumCc, cc) => {
+          const kitsPorItem = itensComKit.map((item) => {
+            const qtd = Number(item.qtdKitInst ?? 0);
+            const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
+            return Math.floor(est / qtd);
+          });
+          return sumCc + Math.min(...kitsPorItem);
+        }, 0);
+      })(),
+      valorReferenciaKitsMdu: itens.reduce((acc, item) => {
+        const qtd = Number(item.qtdKitMdu ?? 0);
+        if (qtd <= 0) return acc;
+        return acc + Number(item.valor || 0) * qtd;
+      }, 0),
+      valorReferenciaKitsInst: itens.reduce((acc, item) => {
+        const qtd = Number(item.qtdKitInst ?? 0);
+        if (qtd <= 0) return acc;
+        return acc + Number(item.valor || 0) * qtd;
       }, 0),
       totalTecnicos: tecnicos.filter((tec) => roleCanViewCC(usuarioAtual, tec.cc)).length,
       totalNoEstoque: estoqueGeral
@@ -936,7 +963,8 @@ export default function App() {
       codigo: itemForm.codigo.trim(),
       nome: itemForm.nome.trim(),
       valor: Number(itemForm.valor || 0),
-      qtd_kit: Number(itemForm.qtdKit || 0),
+      qtd_kit_mdu: Number(itemForm.qtdKitMdu || 0),
+      qtd_kit_inst: Number(itemForm.qtdKitInst || 0),
       minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemForm.minimos[cc] || 0)])),
     };
 
@@ -979,7 +1007,8 @@ export default function App() {
       codigo: itemEdicaoDraft.codigo.trim(),
       nome: itemEdicaoDraft.nome.trim(),
       valor: Number(itemEdicaoDraft.valor || 0),
-      qtd_kit: Number(itemEdicaoDraft.qtdKit || 0),
+      qtd_kit_mdu: Number(itemEdicaoDraft.qtdKitMdu || 0),
+      qtd_kit_inst: Number(itemEdicaoDraft.qtdKitInst || 0),
       minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemEdicaoDraft.minimos[cc] || 0)])),
     };
     const { error } = await supabase.from("itens").update(payload).eq("id", itemEditandoId);
@@ -999,10 +1028,14 @@ export default function App() {
       codigo: item.codigo || "",
       nome: item.nome || "",
       valor: item.valor !== undefined && item.valor !== null ? String(item.valor) : "",
-      qtdKit:
-        item.qtdKit !== undefined && item.qtdKit !== null
-          ? String(item.qtdKit)
-          : String(item.qtd_kit ?? ""),
+      qtdKitMdu:
+        item.qtdKitMdu !== undefined && item.qtdKitMdu !== null
+          ? String(item.qtdKitMdu)
+          : String(item.qtd_kit_mdu ?? ""),
+      qtdKitInst:
+        item.qtdKitInst !== undefined && item.qtdKitInst !== null
+          ? String(item.qtdKitInst)
+          : String(item.qtd_kit_inst ?? ""),
       minimos: Object.fromEntries(CCS.map((cc) => [cc, String(item.minimos?.[cc] ?? "")])),
     });
   };
@@ -1017,7 +1050,8 @@ export default function App() {
       [ITEM_HEADER_CODIGO]: item.codigo,
       [ITEM_HEADER_NOME]: item.nome,
       [ITEM_HEADER_VALOR]: Number(item.valor || 0),
-      [ITEM_HEADER_QTD_KIT]: Number(item.qtdKit || item.qtd_kit || 0),
+      [ITEM_HEADER_QTD_KIT_MDU]: Number(item.qtdKitMdu ?? item.qtd_kit_mdu ?? 0),
+      [ITEM_HEADER_QTD_KIT_INST]: Number(item.qtdKitInst ?? item.qtd_kit_inst ?? 0),
       ...Object.fromEntries(
         ITEM_MINIMO_HEADERS.map(({ cc, header }) => [header, Number(item.minimos?.[cc] || 0)])
       ),
@@ -1030,7 +1064,8 @@ export default function App() {
       [ITEM_HEADER_CODIGO]: "",
       [ITEM_HEADER_NOME]: "",
       [ITEM_HEADER_VALOR]: 0,
-      [ITEM_HEADER_QTD_KIT]: 0,
+      [ITEM_HEADER_QTD_KIT_MDU]: 0,
+      [ITEM_HEADER_QTD_KIT_INST]: 0,
       ...Object.fromEntries(ITEM_MINIMO_HEADERS.map(({ header }) => [header, 0])),
     };
     downloadWorkbook("modelo_itens_ferramentaria.xlsx", "Itens", [modelo]);
@@ -1063,24 +1098,44 @@ export default function App() {
         return;
       }
 
+      const sheetHasQtdMdu = headers.has(normalizeHeaderKey(ITEM_HEADER_QTD_KIT_MDU));
+      const sheetHasQtdInst = headers.has(normalizeHeaderKey(ITEM_HEADER_QTD_KIT_INST));
+
       const payload = rows
         .filter(
           (row) =>
             String(readExcelValue(row, [ITEM_HEADER_CODIGO, "codigo"])).trim() &&
             String(readExcelValue(row, [ITEM_HEADER_NOME, "nome"])).trim()
         )
-        .map((row) => ({
-          codigo: String(readExcelValue(row, [ITEM_HEADER_CODIGO, "codigo"])).trim(),
-          nome: String(readExcelValue(row, [ITEM_HEADER_NOME, "nome"])).trim(),
-          valor: Number(readExcelValue(row, [ITEM_HEADER_VALOR, "valor"]) || 0),
-          qtd_kit: Number(readExcelValue(row, [ITEM_HEADER_QTD_KIT, "qtd_kit", "qtdkit", "qtdKit"]) || 0),
-          minimos: Object.fromEntries(
-            ITEM_MINIMO_HEADERS.map(({ cc, header }) => [
-              cc,
-              Number(readExcelValue(row, [header, cc, `MINIMO_${cc}`, `minimo_${cc}`]) || 0),
-            ])
-          ),
-        }));
+        .map((row) => {
+          const legacyQ = Number(readExcelValue(row, [ITEM_HEADER_QTD_KIT, "qtd_kit", "qtdkit", "qtdKit"]) || 0);
+          let qtd_kit_mdu;
+          let qtd_kit_inst;
+          if (sheetHasQtdMdu || sheetHasQtdInst) {
+            qtd_kit_mdu = sheetHasQtdMdu
+              ? Number(readExcelValue(row, [ITEM_HEADER_QTD_KIT_MDU, "qtd_kit_mdu", "qtdkitmdu"]) || 0)
+              : legacyQ;
+            qtd_kit_inst = sheetHasQtdInst
+              ? Number(readExcelValue(row, [ITEM_HEADER_QTD_KIT_INST, "qtd_kit_inst", "qtdkitinst"]) || 0)
+              : legacyQ;
+          } else {
+            qtd_kit_mdu = legacyQ;
+            qtd_kit_inst = legacyQ;
+          }
+          return {
+            codigo: String(readExcelValue(row, [ITEM_HEADER_CODIGO, "codigo"])).trim(),
+            nome: String(readExcelValue(row, [ITEM_HEADER_NOME, "nome"])).trim(),
+            valor: Number(readExcelValue(row, [ITEM_HEADER_VALOR, "valor"]) || 0),
+            qtd_kit_mdu,
+            qtd_kit_inst,
+            minimos: Object.fromEntries(
+              ITEM_MINIMO_HEADERS.map(({ cc, header }) => [
+                cc,
+                Number(readExcelValue(row, [header, cc, `MINIMO_${cc}`, `minimo_${cc}`]) || 0),
+              ])
+            ),
+          };
+        });
 
       if (!payload.length) {
         alert("Nenhuma linha válida encontrada na planilha.");
@@ -2003,12 +2058,30 @@ export default function App() {
                 iconKey="critico"
                 onClick={() => setDashboardModo("criticos-detalhe")}
               />
-              <MetricCard titulo="Kits disponíveis para entrega" valor={indicadoresDashboard.totalKitsDisponiveis} iconKey="kits" />
               <MetricCard
-                titulo="Valor de referência dos kits (cadastro)"
+                titulo="Kits MDU disponíveis para entrega"
+                valor={indicadoresDashboard.totalKitsDisponiveisMdu}
+                iconKey="kits"
+              />
+              <MetricCard
+                titulo="Kits INST. disponíveis para entrega"
+                valor={indicadoresDashboard.totalKitsDisponiveisInst}
+                iconKey="kits"
+              />
+              <MetricCard
+                titulo="Valor de referência KIT MDU (cadastro)"
                 valor={
                   canViewDashboardValues(usuarioAtual)
-                    ? formatMoney(indicadoresDashboard.valorReferenciaKitsCadastro)
+                    ? formatMoney(indicadoresDashboard.valorReferenciaKitsMdu)
+                    : "Sem permissão"
+                }
+                iconKey="kits"
+              />
+              <MetricCard
+                titulo="Valor de referência KIT INST. (cadastro)"
+                valor={
+                  canViewDashboardValues(usuarioAtual)
+                    ? formatMoney(indicadoresDashboard.valorReferenciaKitsInst)
                     : "Sem permissão"
                 }
                 iconKey="kits"
@@ -2023,14 +2096,15 @@ export default function App() {
               />
             </div>
             <p style={{ ...styles.mutedText, marginTop: 10 }}>
-              <strong>Kit completo:</strong> cada item com Qtd/kit &gt; 0 entra na composição (quantas unidades daquele item
-              são necessárias por kit). <strong>Kits disponíveis para entrega</strong> soma, em cada CC que você vê, o{" "}
-              <strong>mínimo</strong> entre <code>estoque no almoxarifado ÷ Qtd/kit</code> de cada um desses itens — ou
-              seja, quantos kits completos dá para montar no CC (gargalo).{" "}
+              <strong>KIT MDU</strong> e <strong>KIT INST.</strong> têm composições separadas no cadastro (Qtd KIT MDU / Qtd
+              KIT INST.). Para cada tipo, entram só os itens com quantidade &gt; 0 naquele kit.{" "}
+              <strong>Kits disponíveis para entrega</strong> soma, em cada CC visível, o <strong>mínimo</strong> entre{" "}
+              <code>estoque no almoxarifado ÷ Qtd naquele kit</code> entre os itens daquele kit — quantos kits completos dá
+              para montar no CC (gargalo).{" "}
               {canViewDashboardValues(usuarioAtual) && (
                 <>
-                  <strong>Valor de referência dos kits</strong> é a soma de <strong>valor unitário × Qtd/kit</strong> em
-                  todos esses itens (custo de um kit completo no cadastro, sem olhar estoque).
+                  Os <strong>valores de referência</strong> são a soma de <strong>valor unitário × Qtd</strong> nos itens de
+                  cada kit (cadastro, sem olhar estoque).
                 </>
               )}
             </p>
@@ -2205,14 +2279,21 @@ export default function App() {
                   <input
                     style={styles.input}
                     type="number"
-                    placeholder="Qtd deste item no kit completo"
-                    value={itemForm.qtdKit}
-                    onChange={(e) => setItemForm({ ...itemForm, qtdKit: e.target.value })}
+                    placeholder="Qtd no KIT MDU (0 = não entra)"
+                    value={itemForm.qtdKitMdu}
+                    onChange={(e) => setItemForm({ ...itemForm, qtdKitMdu: e.target.value })}
+                  />
+                  <input
+                    style={styles.input}
+                    type="number"
+                    placeholder="Qtd no KIT INST. (0 = não entra)"
+                    value={itemForm.qtdKitInst}
+                    onChange={(e) => setItemForm({ ...itemForm, qtdKitInst: e.target.value })}
                   />
                 </div>
                 <p style={styles.permissionHint}>
-                  Em cada kit completo, informe quantas unidades <strong>deste item</strong> são necessárias (ex.: 1 alicate
-                  → 1). Itens com Qtd/kit zero não entram na composição do kit no dashboard.
+                  Informe quantas unidades <strong>deste item</strong> entram em cada tipo de kit. Itens com quantidade zero
+                  naquele kit não entram na composição nem no cálculo do dashboard para aquele kit.
                 </p>
                 <div style={styles.sectionMini}>
                   <h4 style={styles.sectionMiniTitle}>Estoque mínimo por CC</h4>
@@ -2242,14 +2323,15 @@ export default function App() {
                     <th style={styles.th}>Código</th>
                     <th style={styles.th}>Nome</th>
                     <th style={styles.th}>Valor</th>
-                    <th style={styles.th}>Qtd no kit</th>
+                    <th style={styles.th}>Qtd KIT MDU</th>
+                    <th style={styles.th}>Qtd KIT INST.</th>
                     <th style={styles.th}>Mínimos por CC</th>
                     <th style={styles.th}>Ação</th>
                   </tr>
                 </thead>
                 <tbody>
                   {itens.length === 0 ? (
-                    <tr><td style={styles.td} colSpan={6}>Nenhum item cadastrado.</td></tr>
+                    <tr><td style={styles.td} colSpan={7}>Nenhum item cadastrado.</td></tr>
                   ) : (
                     itens.map((item) =>
                       itemEditandoId === item.id ? (
@@ -2280,8 +2362,16 @@ export default function App() {
                             <input
                               style={styles.input}
                               type="number"
-                              value={itemEdicaoDraft.qtdKit}
-                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, qtdKit: e.target.value }))}
+                              value={itemEdicaoDraft.qtdKitMdu}
+                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, qtdKitMdu: e.target.value }))}
+                            />
+                          </td>
+                          <td style={styles.td}>
+                            <input
+                              style={styles.input}
+                              type="number"
+                              value={itemEdicaoDraft.qtdKitInst}
+                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, qtdKitInst: e.target.value }))}
                             />
                           </td>
                           <td style={styles.td}>
@@ -2327,7 +2417,8 @@ export default function App() {
                           <td style={styles.td}>{item.codigo}</td>
                           <td style={styles.td}>{item.nome}</td>
                           <td style={styles.td}>{formatMoney(item.valor)}</td>
-                          <td style={styles.td}>{item.qtdKit}</td>
+                          <td style={styles.td}>{item.qtdKitMdu}</td>
+                          <td style={styles.td}>{item.qtdKitInst}</td>
                           <td style={styles.td}>
                             <div style={styles.minimosLista}>
                               {CCS.map((cc) => (

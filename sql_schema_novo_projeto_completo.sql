@@ -22,7 +22,8 @@ create table if not exists public.itens (
   codigo text not null,
   nome text not null,
   valor numeric not null default 0,
-  qtd_kit numeric not null default 0,
+  qtd_kit_mdu numeric not null default 0,
+  qtd_kit_inst numeric not null default 0,
   minimos jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
