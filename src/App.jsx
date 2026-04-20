@@ -378,6 +378,8 @@ export default function App() {
 
   const [itens, setItens] = useState([]);
   const [itemForm, setItemForm] = useState(emptyItemForm);
+  const [itemEditandoId, setItemEditandoId] = useState(null);
+  const [itemEdicaoDraft, setItemEdicaoDraft] = useState(emptyItemForm);
 
   const [tecnicos, setTecnicos] = useState([]);
   const [tecnicoForm, setTecnicoForm] = useState(emptyTecnicoForm);
@@ -418,6 +420,10 @@ export default function App() {
 
   useEffect(() => {
     if (pagina !== "dashboard") setDashboardModo("resumo");
+  }, [pagina]);
+
+  useEffect(() => {
+    if (pagina !== "itens") setItemEditandoId(null);
   }, [pagina]);
 
   const carregarUsuariosSistema = async () => {
@@ -961,6 +967,49 @@ export default function App() {
       return;
     }
     await buscarItens();
+  };
+
+  const salvarEdicaoItem = async () => {
+    if (!roleCanManageItems(usuarioAtual) || !itemEditandoId) return;
+    if (!itemEdicaoDraft.codigo.trim() || !itemEdicaoDraft.nome.trim()) {
+      alert("Preencha o código e o nome do item.");
+      return;
+    }
+    const payload = {
+      codigo: itemEdicaoDraft.codigo.trim(),
+      nome: itemEdicaoDraft.nome.trim(),
+      valor: Number(itemEdicaoDraft.valor || 0),
+      qtd_kit: Number(itemEdicaoDraft.qtdKit || 0),
+      minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemEdicaoDraft.minimos[cc] || 0)])),
+    };
+    const { error } = await supabase.from("itens").update(payload).eq("id", itemEditandoId);
+    if (error) {
+      console.error(error);
+      alert(getSupabaseErrorMessage(error, "Erro ao atualizar item."));
+      return;
+    }
+    await buscarItens();
+    setItemEditandoId(null);
+    setItemEdicaoDraft(emptyItemForm());
+  };
+
+  const iniciarEdicaoItem = (item) => {
+    setItemEditandoId(item.id);
+    setItemEdicaoDraft({
+      codigo: item.codigo || "",
+      nome: item.nome || "",
+      valor: item.valor !== undefined && item.valor !== null ? String(item.valor) : "",
+      qtdKit:
+        item.qtdKit !== undefined && item.qtdKit !== null
+          ? String(item.qtdKit)
+          : String(item.qtd_kit ?? ""),
+      minimos: Object.fromEntries(CCS.map((cc) => [cc, String(item.minimos?.[cc] ?? "")])),
+    });
+  };
+
+  const cancelarEdicaoItem = () => {
+    setItemEditandoId(null);
+    setItemEdicaoDraft(emptyItemForm());
   };
 
   const exportarItensExcel = () => {
@@ -2202,28 +2251,113 @@ export default function App() {
                   {itens.length === 0 ? (
                     <tr><td style={styles.td} colSpan={6}>Nenhum item cadastrado.</td></tr>
                   ) : (
-                    itens.map((item) => (
-                      <tr key={item.id}>
-                        <td style={styles.td}>{item.codigo}</td>
-                        <td style={styles.td}>{item.nome}</td>
-                        <td style={styles.td}>{formatMoney(item.valor)}</td>
-                        <td style={styles.td}>{item.qtdKit}</td>
-                        <td style={styles.td}>
-                          <div style={styles.minimosLista}>
-                            {CCS.map((cc) => (
-                              <div key={cc} style={styles.minimoLinha}><strong>{cc}:</strong> {Number(item.minimos?.[cc] || 0)}</div>
-                            ))}
-                          </div>
-                        </td>
-                        <td style={styles.td}>
-                          {roleCanManageItems(usuarioAtual) ? (
-                            <button style={styles.deleteButton} onClick={() => excluirItem(item.id)}>Excluir</button>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    itens.map((item) =>
+                      itemEditandoId === item.id ? (
+                        <tr key={item.id}>
+                          <td style={styles.td}>
+                            <input
+                              style={styles.input}
+                              value={itemEdicaoDraft.codigo}
+                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, codigo: e.target.value }))}
+                            />
+                          </td>
+                          <td style={styles.td}>
+                            <input
+                              style={styles.input}
+                              value={itemEdicaoDraft.nome}
+                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, nome: e.target.value }))}
+                            />
+                          </td>
+                          <td style={styles.td}>
+                            <input
+                              style={styles.input}
+                              type="number"
+                              value={itemEdicaoDraft.valor}
+                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, valor: e.target.value }))}
+                            />
+                          </td>
+                          <td style={styles.td}>
+                            <input
+                              style={styles.input}
+                              type="number"
+                              value={itemEdicaoDraft.qtdKit}
+                              onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, qtdKit: e.target.value }))}
+                            />
+                          </td>
+                          <td style={styles.td}>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                                gap: 8,
+                                maxWidth: 420,
+                              }}
+                            >
+                              {CCS.map((cc) => (
+                                <input
+                                  key={cc}
+                                  style={{ ...styles.input, fontSize: 12 }}
+                                  type="number"
+                                  title={cc}
+                                  placeholder={cc.replace("CC NET ", "")}
+                                  value={itemEdicaoDraft.minimos[cc]}
+                                  onChange={(e) =>
+                                    setItemEdicaoDraft((prev) => ({
+                                      ...prev,
+                                      minimos: { ...prev.minimos, [cc]: e.target.value },
+                                    }))
+                                  }
+                                />
+                              ))}
+                            </div>
+                          </td>
+                          <td style={styles.td}>
+                            <div style={styles.actionRow}>
+                              <button type="button" style={styles.primaryButtonInline} onClick={salvarEdicaoItem}>
+                                Salvar
+                              </button>
+                              <button type="button" style={styles.secondaryButtonInline} onClick={cancelarEdicaoItem}>
+                                Cancelar
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={item.id}>
+                          <td style={styles.td}>{item.codigo}</td>
+                          <td style={styles.td}>{item.nome}</td>
+                          <td style={styles.td}>{formatMoney(item.valor)}</td>
+                          <td style={styles.td}>{item.qtdKit}</td>
+                          <td style={styles.td}>
+                            <div style={styles.minimosLista}>
+                              {CCS.map((cc) => (
+                                <div key={cc} style={styles.minimoLinha}>
+                                  <strong>{cc}:</strong> {Number(item.minimos?.[cc] || 0)}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                          <td style={styles.td}>
+                            {roleCanManageItems(usuarioAtual) ? (
+                              <div style={styles.actionRow}>
+                                <button
+                                  type="button"
+                                  style={styles.secondaryButtonInline}
+                                  onClick={() => iniciarEdicaoItem(item)}
+                                >
+                                  Editar
+                                </button>
+                                <button style={styles.deleteButton} onClick={() => excluirItem(item.id)}>
+                                  Excluir
+                                </button>
+                              </div>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    )
                   )}
                 </tbody>
               </table>
