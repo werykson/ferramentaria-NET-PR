@@ -2095,19 +2095,6 @@ export default function App() {
                 valor={canViewDashboardValues(usuarioAtual) ? formatMoney(indicadoresDashboard.valorTotalNoEstoque) : "Sem permissão"}
               />
             </div>
-            <p style={{ ...styles.mutedText, marginTop: 10 }}>
-              <strong>KIT MDU</strong> e <strong>KIT INST.</strong> têm composições separadas no cadastro (Qtd KIT MDU / Qtd
-              KIT INST.). Para cada tipo, entram só os itens com quantidade &gt; 0 naquele kit.{" "}
-              <strong>Kits disponíveis para entrega</strong> soma, em cada CC visível, o <strong>mínimo</strong> entre{" "}
-              <code>estoque no almoxarifado ÷ Qtd naquele kit</code> entre os itens daquele kit — quantos kits completos dá
-              para montar no CC (gargalo).{" "}
-              {canViewDashboardValues(usuarioAtual) && (
-                <>
-                  Os <strong>valores de referência</strong> são a soma de <strong>valor unitário × Qtd</strong> nos itens de
-                  cada kit (cadastro, sem olhar estoque).
-                </>
-              )}
-            </p>
             {!canViewDashboardValues(usuarioAtual) && (
               <p style={{ ...styles.mutedText, marginTop: 10 }}>
                 Seu usuário não possui permissão para visualizar valores financeiros no dashboard.
