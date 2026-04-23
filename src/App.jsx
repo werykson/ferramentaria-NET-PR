@@ -2224,15 +2224,18 @@ export default function App() {
     <div style={styles.appShell}>
       <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
-          <img
-            src={BRAND_LOGO_SRC}
-            alt="Logo EQS Engenharia"
-            style={styles.sidebarLogo}
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-          />
-          <div>Ferramentaria NET PR</div>
+          <div style={styles.sidebarBrandRow}>
+            <img
+              src={BRAND_LOGO_SRC}
+              alt="Logo EQS Engenharia"
+              style={styles.sidebarLogo}
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+            <div style={styles.sidebarNetPr}>NET PR</div>
+          </div>
+          <div style={styles.sidebarTitle}>FERRAMENTARIA</div>
         </div>
         <div style={styles.userBox}>
           <div style={styles.userBoxName}>{usuarioAtual.nome}</div>
@@ -3793,8 +3796,11 @@ const styles = {
   loginHint: { marginTop: 16, fontSize: 12, color: "#64748b" },
   appShell: { minHeight: "100vh", display: "flex", background: theme.colors.surface, fontFamily: theme.fontStack },
   sidebar: { width: 280, background: "linear-gradient(180deg, #0b1220 0%, #111827 100%)", color: "#ffffff", padding: 24, boxSizing: "border-box", boxShadow: "8px 0 30px rgba(15,23,42,0.18)", position: "sticky", top: 0, height: "100vh", overflowY: "auto" },
-  sidebarHeader: { fontSize: 23, fontWeight: 700, marginBottom: 18, lineHeight: 1.15, display: "flex", flexDirection: "column", gap: 10 },
+  sidebarHeader: { marginBottom: 18, lineHeight: 1.15, display: "flex", flexDirection: "column", gap: 8 },
+  sidebarBrandRow: { display: "flex", alignItems: "center", gap: 10 },
   sidebarLogo: { width: 100, height: 44, objectFit: "contain", borderRadius: 6, background: "#ffffff", padding: "4px 6px" },
+  sidebarNetPr: { fontSize: 28, fontWeight: 800, letterSpacing: 0.5, color: "#ffffff" },
+  sidebarTitle: { fontSize: 28, fontWeight: 800, letterSpacing: 0.5, color: "#ffffff" },
   userBox: { background: "rgba(30,41,59,0.9)", borderRadius: 14, padding: 12, marginBottom: 22, border: "1px solid rgba(148,163,184,0.2)" },
   userBoxName: { fontWeight: 700 },
   userBoxRole: { color: "#cbd5e1", marginTop: 6, fontSize: 13 },
