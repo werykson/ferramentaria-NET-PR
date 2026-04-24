@@ -493,6 +493,7 @@ export default function App() {
   }, []);
 
   const [estoqueFiltro, setEstoqueFiltro] = useState({ cc: "", tecnico_id: "", item_id: "", busca_nome: "" });
+  const [mostrarItensZerados, setMostrarItensZerados] = useState(false);
 
   const [usuarioForm, setUsuarioForm] = useState({
     nome: "",
@@ -2267,8 +2268,9 @@ export default function App() {
 
     return Object.values(consolidadoPorItem)
       .filter((registro) => !termoBusca || normalizeSearchText(registro.itemNome).includes(termoBusca))
+      .filter((registro) => mostrarItensZerados || Number(registro.total || 0) > 0)
       .sort((a, b) => a.itemNome.localeCompare(b.itemNome, "pt-BR"));
-  }, [estoqueGeral, estoquePorTecnico, estoqueFiltro, usuarioAtual, itens]);
+  }, [estoqueGeral, estoquePorTecnico, estoqueFiltro, usuarioAtual, itens, mostrarItensZerados]);
 
   if (!usuarioAtual) {
     return (
@@ -3414,6 +3416,12 @@ export default function App() {
             <div style={styles.sectionHeaderLine}>
               <h3 style={styles.sectionTitle}>Visão consolidada de estoque</h3>
               <div style={styles.actionRow}>
+                <button
+                  style={styles.secondaryButtonInline}
+                  onClick={() => setMostrarItensZerados((prev) => !prev)}
+                >
+                  {mostrarItensZerados ? "Ocultar itens zerados" : "Mostrar itens zerados"}
+                </button>
                 <button style={styles.secondaryButtonInline} onClick={exportarRelatorioEstoqueExcel}>
                   Exportar relatório completo
                 </button>
