@@ -37,7 +37,8 @@ const STORAGE_KEY_TRI = "ferramentaria_net_pr_tri_v3";
 const BRAND_LOGO_SRC = "/logo-eqs.png";
 const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
-const MAX_LINHAS_HISTORICO = 25;
+const LIMITE_PADRAO_LISTA = 15;
+const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
 
 const TIPOS_MOV = [
   { value: "entrada", label: "Entrada em estoque" },
@@ -504,12 +505,16 @@ export default function App() {
   const [movBuscaTecnico, setMovBuscaTecnico] = useState("");
   const [movFiltroDataInicio, setMovFiltroDataInicio] = useState("");
   const [movFiltroDataFim, setMovFiltroDataFim] = useState("");
+  const [movLimiteLinhas, setMovLimiteLinhas] = useState(LIMITE_PADRAO_LISTA);
+  const [movPaginaAtual, setMovPaginaAtual] = useState(1);
 
   const [triangulacoes, setTriangulacoes] = useState([]);
   const [triForm, setTriForm] = useState(emptyTriForm);
   const [loteTriangulacoes, setLoteTriangulacoes] = useState([]);
   const [triFiltroDataInicio, setTriFiltroDataInicio] = useState("");
   const [triFiltroDataFim, setTriFiltroDataFim] = useState("");
+  const [triLimiteLinhas, setTriLimiteLinhas] = useState(LIMITE_PADRAO_LISTA);
+  const [triPaginaAtual, setTriPaginaAtual] = useState(1);
   const [toasts, setToasts] = useState([]);
 
   const notify = useCallback((message, variant = "info") => {
@@ -2178,27 +2183,63 @@ export default function App() {
       .slice(0, 80);
   }, [opcoesTecnicoMovimentacao, movBuscaTecnico]);
 
-  const historicoMovimentacoesVisivel = useMemo(() => {
+  const historicoMovimentacoesFiltrado = useMemo(() => {
     const base = movimentacoes
       .filter((mov) => roleCanViewCC(usuarioAtual, mov.cc))
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
-    const filtrado = base.filter((mov) =>
+    return base.filter((mov) =>
       isRegistroDentroDoPeriodo(mov.created_at, movFiltroDataInicio, movFiltroDataFim)
     );
-
-    return filtrado.slice(0, MAX_LINHAS_HISTORICO);
   }, [movimentacoes, usuarioAtual, movFiltroDataInicio, movFiltroDataFim]);
 
-  const triangulacoesVisiveis = useMemo(() => {
+  const triangulacoesFiltradas = useMemo(() => {
     const base = [...triangulacoes].sort(
       (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
     );
-    const filtrado = base.filter((tri) =>
+    return base.filter((tri) =>
       isRegistroDentroDoPeriodo(tri.created_at, triFiltroDataInicio, triFiltroDataFim)
     );
-    return filtrado.slice(0, MAX_LINHAS_HISTORICO);
   }, [triangulacoes, triFiltroDataInicio, triFiltroDataFim]);
+
+  const movTotalPaginas = useMemo(() => {
+    if (movLimiteLinhas === "tudo") return 1;
+    return Math.max(1, Math.ceil(historicoMovimentacoesFiltrado.length / Number(movLimiteLinhas)));
+  }, [historicoMovimentacoesFiltrado.length, movLimiteLinhas]);
+  const triTotalPaginas = useMemo(() => {
+    if (triLimiteLinhas === "tudo") return 1;
+    return Math.max(1, Math.ceil(triangulacoesFiltradas.length / Number(triLimiteLinhas)));
+  }, [triangulacoesFiltradas.length, triLimiteLinhas]);
+
+  const historicoMovimentacoesVisivel = useMemo(() => {
+    if (movLimiteLinhas === "tudo") return historicoMovimentacoesFiltrado;
+    const limite = Number(movLimiteLinhas);
+    const inicio = (movPaginaAtual - 1) * limite;
+    return historicoMovimentacoesFiltrado.slice(inicio, inicio + limite);
+  }, [historicoMovimentacoesFiltrado, movLimiteLinhas, movPaginaAtual]);
+
+  const triangulacoesVisiveis = useMemo(() => {
+    if (triLimiteLinhas === "tudo") return triangulacoesFiltradas;
+    const limite = Number(triLimiteLinhas);
+    const inicio = (triPaginaAtual - 1) * limite;
+    return triangulacoesFiltradas.slice(inicio, inicio + limite);
+  }, [triangulacoesFiltradas, triLimiteLinhas, triPaginaAtual]);
+
+  useEffect(() => {
+    setMovPaginaAtual(1);
+  }, [movFiltroDataInicio, movFiltroDataFim, movLimiteLinhas]);
+
+  useEffect(() => {
+    setTriPaginaAtual(1);
+  }, [triFiltroDataInicio, triFiltroDataFim, triLimiteLinhas]);
+
+  useEffect(() => {
+    if (movPaginaAtual > movTotalPaginas) setMovPaginaAtual(movTotalPaginas);
+  }, [movPaginaAtual, movTotalPaginas]);
+
+  useEffect(() => {
+    if (triPaginaAtual > triTotalPaginas) setTriPaginaAtual(triTotalPaginas);
+  }, [triPaginaAtual, triTotalPaginas]);
 
   useEffect(() => {
     setTecnicoEditandoId(null);
@@ -3335,7 +3376,40 @@ export default function App() {
                         onChange={(e) => setTriFiltroDataFim(e.target.value)}
                       />
                     </div>
-                    <p style={styles.mutedText}>Mostrando no máximo {MAX_LINHAS_HISTORICO} triangulações.</p>
+                    <div style={styles.actionRow}>
+                      <select
+                        style={styles.inputCompact}
+                        value={String(triLimiteLinhas)}
+                        onChange={(e) => setTriLimiteLinhas(e.target.value === "tudo" ? "tudo" : Number(e.target.value))}
+                      >
+                        {OPCOES_LIMITE_LISTA.map((opt) => (
+                          <option key={String(opt)} value={String(opt)}>
+                            {opt === "tudo" ? "Tudo" : `${opt} linhas`}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        style={styles.secondaryButtonInline}
+                        onClick={() => setTriPaginaAtual((p) => Math.max(1, p - 1))}
+                        disabled={triLimiteLinhas === "tudo" || triPaginaAtual <= 1}
+                      >
+                        Anterior
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.secondaryButtonInline}
+                        onClick={() => setTriPaginaAtual((p) => Math.min(triTotalPaginas, p + 1))}
+                        disabled={triLimiteLinhas === "tudo" || triPaginaAtual >= triTotalPaginas}
+                      >
+                        Próxima
+                      </button>
+                      <span style={styles.mutedText}>
+                        {triLimiteLinhas === "tudo"
+                          ? `Mostrando todas (${triangulacoesFiltradas.length})`
+                          : `Página ${triPaginaAtual} de ${triTotalPaginas} (${triangulacoesFiltradas.length} registros)`}
+                      </span>
+                    </div>
                   </div>
                   <div style={styles.tableWrap}>
                     <table style={styles.table}>
@@ -3448,7 +3522,40 @@ export default function App() {
                     onChange={(e) => setMovFiltroDataFim(e.target.value)}
                   />
                 </div>
-                <p style={styles.mutedText}>Mostrando no máximo {MAX_LINHAS_HISTORICO} movimentações.</p>
+                <div style={styles.actionRow}>
+                  <select
+                    style={styles.inputCompact}
+                    value={String(movLimiteLinhas)}
+                    onChange={(e) => setMovLimiteLinhas(e.target.value === "tudo" ? "tudo" : Number(e.target.value))}
+                  >
+                    {OPCOES_LIMITE_LISTA.map((opt) => (
+                      <option key={String(opt)} value={String(opt)}>
+                        {opt === "tudo" ? "Tudo" : `${opt} linhas`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    style={styles.secondaryButtonInline}
+                    onClick={() => setMovPaginaAtual((p) => Math.max(1, p - 1))}
+                    disabled={movLimiteLinhas === "tudo" || movPaginaAtual <= 1}
+                  >
+                    Anterior
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryButtonInline}
+                    onClick={() => setMovPaginaAtual((p) => Math.min(movTotalPaginas, p + 1))}
+                    disabled={movLimiteLinhas === "tudo" || movPaginaAtual >= movTotalPaginas}
+                  >
+                    Próxima
+                  </button>
+                  <span style={styles.mutedText}>
+                    {movLimiteLinhas === "tudo"
+                      ? `Mostrando todas (${historicoMovimentacoesFiltrado.length})`
+                      : `Página ${movPaginaAtual} de ${movTotalPaginas} (${historicoMovimentacoesFiltrado.length} registros)`}
+                  </span>
+                </div>
               </div>
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
@@ -4087,6 +4194,16 @@ const styles = {
     marginBottom: 16,
     borderRadius: 10,
     border: "1px solid #cbd5e1", boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+    boxSizing: "border-box",
+    fontSize: 14,
+    background: "#fff",
+  },
+  inputCompact: {
+    minWidth: 140,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
     boxSizing: "border-box",
     fontSize: 14,
     background: "#fff",
