@@ -3042,26 +3042,26 @@ export default function App() {
         {!carregando && pagina === "movimentacoes" && (
           <>
             <div style={styles.section}>
-              <div style={styles.dashboardTabsRow}>
+              <div style={styles.movTabsWrap}>
                 <button
                   type="button"
                   style={{
-                    ...styles.dashboardTabButton,
-                    ...(movimentacoesAbaAtiva === "lancar" ? styles.dashboardTabButtonActive : {}),
+                    ...styles.movTabButton,
+                    ...(movimentacoesAbaAtiva === "lancar" ? styles.movTabButtonActive : {}),
                   }}
                   onClick={() => setMovimentacoesAbaAtiva("lancar")}
                 >
-                  Lançar movimentações
+                  [+] Lançar movimentações
                 </button>
                 <button
                   type="button"
                   style={{
-                    ...styles.dashboardTabButton,
-                    ...(movimentacoesAbaAtiva === "triangulacao" ? styles.dashboardTabButtonActive : {}),
+                    ...styles.movTabButton,
+                    ...(movimentacoesAbaAtiva === "triangulacao" ? styles.movTabButtonActive : {}),
                   }}
                   onClick={() => setMovimentacoesAbaAtiva("triangulacao")}
                 >
-                  Triangulação entre centros de custo
+                  [TRI] Triangulação entre centros de custo
                 </button>
               </div>
             </div>
@@ -4133,6 +4133,32 @@ const styles = {
     border: "1px solid #2563eb",
     background: "#dbeafe",
     color: "#1d4ed8",
+  },
+  movTabsWrap: {
+    display: "inline-flex",
+    gap: 10,
+    flexWrap: "wrap",
+    padding: 8,
+    borderRadius: 14,
+    border: "1px solid #dbeafe",
+    background: "linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)",
+  },
+  movTabButton: {
+    border: "1px solid #bfdbfe",
+    borderRadius: 12,
+    background: "#ffffff",
+    color: "#1e293b",
+    fontWeight: 700,
+    padding: "10px 16px",
+    cursor: "pointer",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+    transition: "all 0.2s ease",
+  },
+  movTabButtonActive: {
+    border: "1px solid #2563eb",
+    background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
+    color: "#ffffff",
+    boxShadow: "0 6px 14px rgba(37,99,235,0.25)",
   },
   mutedText: { color: "#64748b", marginBottom: 0 },
   warningText: { color: "#9a3412", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 10, padding: "8px 10px", marginBottom: 12, fontSize: 13 },
