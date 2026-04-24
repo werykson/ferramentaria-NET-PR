@@ -86,6 +86,11 @@ function normalizeSearchText(value) {
     .trim();
 }
 
+function isHiddenFromUsersScreen(user) {
+  const login = String(user?.usuario || "").trim().toLowerCase();
+  return login === "admin";
+}
+
 const ITEM_HEADER_CODIGO = "CODIGO";
 const ITEM_HEADER_NOME = "NOME";
 const ITEM_HEADER_VALOR = "VALOR";
@@ -2103,6 +2108,7 @@ export default function App() {
     () =>
       usuariosSistema
         .map((user) => normalizeUser(user))
+        .filter((user) => !isHiddenFromUsersScreen(user))
         .sort((a, b) => String(a?.nome || "").localeCompare(String(b?.nome || ""), "pt-BR")),
     [usuariosSistema]
   );
