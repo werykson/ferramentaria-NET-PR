@@ -39,7 +39,7 @@ const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 const TIPOS_MOV = [
   { value: "entrada", label: "Entrada em estoque" },
@@ -2552,10 +2552,11 @@ export default function App() {
               }}
             />
             <div>
-              <div style={styles.loginBadge}>Controle de estoque</div>
-              <h1 style={styles.loginTitle}>Ferramentaria NET PR</h1>
+              <div style={styles.loginBadge}>CONTROLE E ESTOQUE</div>
+              <h1 style={styles.loginTitle}>FERRAMENTARIA NET PR</h1>
             </div>
           </div>
+          <div style={styles.loginAccentLine} />
           <p style={styles.loginText}>Entre com seu usuário para acessar o painel.</p>
           {erroUsuarios && <p style={styles.warningText}>{erroUsuarios}</p>}
           {carregandoUsuarios && <p style={styles.mutedText}>Carregando usuários...</p>}
@@ -2582,6 +2583,7 @@ export default function App() {
           />
           <button type="submit" style={styles.primaryButton}>Entrar</button>
           <p style={styles.loginHint}>Agora também dá para entrar apertando Enter.</p>
+          <p style={styles.loginVersion}>Versão {APP_VERSION}</p>
         </form>
       </div>
       </>
@@ -2614,6 +2616,7 @@ export default function App() {
               <h1 style={styles.loginTitle}>Defina sua senha pessoal</h1>
             </div>
           </div>
+          <div style={styles.loginAccentLine} />
           <p style={styles.loginText}>
             Por segurança, você precisa alterar a senha padrão antes de acessar os módulos.
           </p>
@@ -2638,6 +2641,7 @@ export default function App() {
             placeholder="Repita sua nova senha"
           />
           <button type="submit" style={styles.primaryButton}>Salvar nova senha</button>
+          <p style={styles.loginVersion}>Versão {APP_VERSION}</p>
         </form>
       </div>
       </>
@@ -4481,9 +4485,10 @@ const styles = {
     boxSizing: "border-box",
   },
   brandRow: { display: "flex", alignItems: "center", gap: 14, marginBottom: 8 },
-  brandLogo: { width: 70, height: 36, objectFit: "contain", borderRadius: 6 },
-  loginBadge: { display: "inline-flex", background: "#e0e7ff", color: "#3730a3", padding: "6px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, marginBottom: 14 },
-  loginTitle: { marginTop: 0, marginBottom: 10, color: "#0f172a", fontSize: 32, lineHeight: 1.1, letterSpacing: "-0.02em" },
+  brandLogo: { width: 90, height: 46, objectFit: "contain", borderRadius: 8, background: "#ffffff", padding: "4px 6px", boxShadow: "0 8px 20px rgba(0,0,0,0.12)" },
+  loginBadge: { display: "inline-flex", background: "#fee2e2", color: "#991b1b", padding: "6px 10px", borderRadius: 999, fontSize: 11, fontWeight: 800, marginBottom: 10, letterSpacing: 0.7 },
+  loginTitle: { marginTop: 0, marginBottom: 6, color: "#0f172a", fontSize: 38, lineHeight: 0.98, letterSpacing: 0.2, fontWeight: 900 },
+  loginAccentLine: { width: 160, height: 4, borderRadius: 999, background: "linear-gradient(90deg, #dc2626 0%, #ef4444 100%)", boxShadow: "0 4px 12px rgba(220,38,38,0.3)", marginBottom: 14 },
   loginText: { marginTop: 0, marginBottom: 20, color: "#475569", fontSize: 14 },
   label: { display: "block", marginBottom: 8, color: "#0f172a", fontWeight: 600 },
   input: {
@@ -4577,6 +4582,7 @@ const styles = {
   },
   actionRow: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
   loginHint: { marginTop: 16, fontSize: 12, color: "#64748b" },
+  loginVersion: { marginTop: 10, marginBottom: 0, fontSize: 12, color: "#64748b", fontWeight: 600 },
   appShell: { minHeight: "100vh", display: "flex", background: theme.colors.surface, fontFamily: theme.fontStack },
   sidebar: { width: 280, background: "linear-gradient(180deg, #05070d 0%, #111827 60%, #1f2937 100%)", color: "#ffffff", padding: 24, boxSizing: "border-box", boxShadow: "8px 0 30px rgba(15,23,42,0.28)", position: "sticky", top: 0, height: "100vh", overflowY: "auto", borderRight: "1px solid rgba(220,38,38,0.32)" },
   sidebarHeader: { marginBottom: 18, lineHeight: 1.15, display: "flex", flexDirection: "column", gap: 8 },
