@@ -39,6 +39,7 @@ const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
+const APP_VERSION = "1.1.0";
 
 const TIPOS_MOV = [
   { value: "entrada", label: "Entrada em estoque" },
@@ -2661,6 +2662,9 @@ export default function App() {
             <div style={styles.sidebarNetPr}>NET PR</div>
           </div>
           <div style={styles.sidebarTitle}>FERRAMENTARIA</div>
+          <div style={styles.sidebarAccentLine} />
+          <div style={styles.sidebarSubtitle}>Controle de estoque técnico</div>
+          <div style={styles.sidebarVersion}>Versão {APP_VERSION}</div>
         </div>
         <div style={styles.userBox}>
           <div style={styles.userBoxName}>{usuarioAtual.nome}</div>
@@ -4571,44 +4575,48 @@ const styles = {
     display: "inline-flex",
     alignItems: "center",
   },
-  actionRow: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" },
+  actionRow: { display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" },
   loginHint: { marginTop: 16, fontSize: 12, color: "#64748b" },
   appShell: { minHeight: "100vh", display: "flex", background: theme.colors.surface, fontFamily: theme.fontStack },
-  sidebar: { width: 280, background: "linear-gradient(180deg, #0b1220 0%, #111827 100%)", color: "#ffffff", padding: 24, boxSizing: "border-box", boxShadow: "8px 0 30px rgba(15,23,42,0.18)", position: "sticky", top: 0, height: "100vh", overflowY: "auto" },
+  sidebar: { width: 280, background: "linear-gradient(180deg, #05070d 0%, #111827 60%, #1f2937 100%)", color: "#ffffff", padding: 24, boxSizing: "border-box", boxShadow: "8px 0 30px rgba(15,23,42,0.28)", position: "sticky", top: 0, height: "100vh", overflowY: "auto", borderRight: "1px solid rgba(220,38,38,0.32)" },
   sidebarHeader: { marginBottom: 18, lineHeight: 1.15, display: "flex", flexDirection: "column", gap: 8 },
   sidebarBrandRow: { display: "flex", alignItems: "center", gap: 10 },
-  sidebarLogo: { width: 100, height: 44, objectFit: "contain", borderRadius: 6, background: "#ffffff", padding: "4px 6px" },
-  sidebarNetPr: { fontSize: 28, fontWeight: 800, letterSpacing: 0.5, color: "#ffffff" },
-  sidebarTitle: { fontSize: 28, fontWeight: 800, letterSpacing: 0.5, color: "#ffffff" },
-  userBox: { background: "rgba(30,41,59,0.9)", borderRadius: 14, padding: 12, marginBottom: 22, border: "1px solid rgba(148,163,184,0.2)" },
+  sidebarLogo: { width: 100, height: 44, objectFit: "contain", borderRadius: 8, background: "#ffffff", padding: "4px 6px", boxShadow: "0 8px 20px rgba(0,0,0,0.22)" },
+  sidebarNetPr: { fontSize: 40, fontWeight: 900, letterSpacing: 1, color: "#ffffff", lineHeight: 0.95 },
+  sidebarTitle: { fontSize: 44, fontWeight: 900, letterSpacing: 1, color: "#ffffff", lineHeight: 0.95, textShadow: "0 6px 18px rgba(0,0,0,0.35)" },
+  sidebarAccentLine: { width: 140, height: 4, borderRadius: 999, background: "linear-gradient(90deg, #dc2626 0%, #ef4444 100%)", boxShadow: "0 4px 12px rgba(220,38,38,0.42)" },
+  sidebarSubtitle: { color: "#e2e8f0", fontSize: 12, fontWeight: 600, letterSpacing: 1.1, textTransform: "uppercase" },
+  sidebarVersion: { color: "#94a3b8", fontSize: 12, fontWeight: 600 },
+  userBox: { background: "rgba(15,23,42,0.78)", borderRadius: 14, padding: 12, marginBottom: 22, border: "1px solid rgba(220,38,38,0.25)" },
   userBoxName: { fontWeight: 700 },
   userBoxRole: { color: "#cbd5e1", marginTop: 6, fontSize: 13 },
   menu: { display: "flex", flexDirection: "column", gap: 10 },
   menuButtonContent: { display: "inline-flex", alignItems: "center", gap: 10 },
   menuIconSvg: { width: 18, height: 18, display: "block" },
   menuButton: {
-    background: "transparent",
-    color: "#cbd5e1",
-    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(15,23,42,0.28)",
+    color: "#e2e8f0",
+    border: "1px solid rgba(226,232,240,0.16)",
     borderRadius: 12,
     padding: 12,
     textAlign: "left",
     cursor: "pointer",
     fontSize: 14,
+    fontWeight: 600,
   },
   menuButtonActive: {
-    background: "linear-gradient(135deg, rgba(30,41,59,1) 0%, rgba(37,99,235,0.32) 100%)",
-    color: "#bfdbfe",
-    border: "1px solid rgba(96,165,250,0.5)",
-    boxShadow: "inset 0 0 0 1px rgba(30,64,175,0.25)",
+    background: "linear-gradient(135deg, rgba(127,29,29,0.92) 0%, rgba(185,28,28,0.82) 100%)",
+    color: "#ffffff",
+    border: "1px solid rgba(248,113,113,0.72)",
+    boxShadow: "0 8px 18px rgba(127,29,29,0.35)",
   },
   main: { flex: 1, padding: 32, boxSizing: "border-box", maxWidth: "calc(100vw - 280px)" },
-  topbar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, gap: 16, background: "#ffffff", border: "1px solid #dbeafe", borderRadius: 16, padding: "14px 18px", boxShadow: "0 8px 18px rgba(15,23,42,0.06)", backdropFilter: "blur(4px)" },
+  topbar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, gap: 16, background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 16, padding: "14px 18px", boxShadow: "0 8px 18px rgba(15,23,42,0.06), inset 0 1px 0 rgba(220,38,38,0.08)", backdropFilter: "blur(4px)" },
   pageTitle: { margin: 0, color: "#0f172a" },
   topbarSub: { color: "#64748b", fontSize: 14, marginTop: 6 },
   logoutButton: { padding: "10px 16px", borderRadius: 10, border: 0, background: "#0f172a", color: "#ffffff", cursor: "pointer" },
   cardsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 },
-  card: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 12px 28px rgba(15,23,42,0.08)", minHeight: 120, border: "1px solid #dbe5f1", transition: "transform 0.2s ease" },
+  card: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 12px 28px rgba(15,23,42,0.08)", minHeight: 120, border: "1px solid #dbe5f1", transition: "transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease" },
   cardClickable: { cursor: "pointer", outline: "none" },
   cardHighlight: { border: "2px solid #fecaca" },
   cardTitleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 },
@@ -4633,7 +4641,7 @@ const styles = {
   kitRowLabel: { fontSize: 13, color: "#334155" },
   kitRowValue: { fontSize: 18, color: "#0f172a" },
   section: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 12px 28px rgba(15,23,42,0.08)", marginTop: 24, border: "1px solid #dbe5f1" },
-  sectionMini: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, marginTop: 16, marginBottom: 16 },
+  sectionMini: { background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)", border: "1px solid #e2e8f0", borderRadius: 14, padding: 14, marginTop: 14, marginBottom: 14 },
   sectionMiniTitle: { marginTop: 0, marginBottom: 16, color: "#0f172a" },
   sectionTitle: { marginTop: 0, color: "#0f172a" },
   sectionHeaderLine: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
@@ -4680,11 +4688,11 @@ const styles = {
   },
   mutedText: { color: "#64748b", marginBottom: 0 },
   warningText: { color: "#9a3412", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 10, padding: "8px 10px", marginBottom: 12, fontSize: 13 },
-  formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 },
-  tableWrap: { marginTop: 24, overflowX: "auto" },
+  formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 10 },
+  tableWrap: { marginTop: 18, overflowX: "auto" },
   table: { width: "100%", borderCollapse: "separate", borderSpacing: 0 },
-  th: { textAlign: "left", padding: 12, borderBottom: "1px solid #dbe5f1", background: "#f8fafc", color: "#334155", fontSize: 13, letterSpacing: 0.2, verticalAlign: "top" },
-  td: { padding: 12, borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#0f172a", verticalAlign: "top" },
+  th: { textAlign: "left", padding: "11px 12px", borderBottom: "1px solid #dbe5f1", background: "#f8fafc", color: "#334155", fontSize: 13, fontWeight: 700, letterSpacing: 0.2, verticalAlign: "top" },
+  td: { padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#0f172a", verticalAlign: "top" },
   minimosLista: { display: "flex", flexDirection: "column", gap: 4, minWidth: 240 },
   minimoLinha: { fontSize: 12, color: "#334155" },
   warningBox: { background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", borderRadius: 12, padding: 12, marginBottom: 16 },

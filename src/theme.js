@@ -1,7 +1,7 @@
 /** Tokens visuais centralizados (tipografia, cores, raios). */
 export const theme = {
   fontStack:
-    'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif',
   colors: {
     slate900: "#0f172a",
     slate700: "#334155",
