@@ -4270,7 +4270,7 @@ function MetricCard({ titulo, valor, destaque = false, iconKey = null, onClick =
 
 function KitsFerramentalCard({ inst, hfc, gpon, mdu, onOpenInst, onOpenHfc, onOpenGpon, onOpenMdu }) {
   const rows = [
-    { key: "INST", valor: inst, onClick: onOpenInst },
+    { key: "COMPLETO", valor: inst, onClick: onOpenInst },
     { key: "HFC", valor: hfc, onClick: onOpenHfc },
     { key: "GPON", valor: gpon, onClick: onOpenGpon },
     { key: "MDU", valor: mdu, onClick: onOpenMdu },
@@ -4534,7 +4534,7 @@ const styles = {
   cardIcon: { color: "#1d4ed8", lineHeight: 1, display: "inline-flex", alignItems: "center" },
   cardIconSvg: { width: 22, height: 22, display: "block" },
   cardValueSmall: { marginTop: 12, fontSize: 22, fontWeight: 700, color: "#0f172a", lineHeight: 1.25 },
-  kitsFerramentalCard: { minHeight: 220 },
+  kitsFerramentalCard: { minHeight: 220, gridRow: "span 2", alignSelf: "stretch" },
   kitRowsWrap: { marginTop: 12, display: "grid", gap: 8 },
   kitRowButton: {
     border: "1px solid #cbd5e1",
