@@ -3879,7 +3879,7 @@ export default function App() {
                   {mostrarItensZerados ? "Ocultar itens zerados" : "Mostrar itens zerados"}
                 </button>
                 <button style={styles.secondaryButtonInline} onClick={exportarRelatorioEstoqueExcel}>
-                  EXPORTAR RELATÓRIO
+                  Exportar relatório
                 </button>
               </div>
             </div>
@@ -4350,7 +4350,7 @@ function KitsFerramentalCard({ inst, hfc, gpon, mdu, onOpenInst, onOpenHfc, onOp
   return (
     <div style={{ ...styles.card, ...styles.kitsFerramentalCard }}>
       <div style={styles.cardTitleRow}>
-        <div style={styles.cardTitle}>KITS FERRAMENTAL</div>
+        <div style={styles.cardTitle}>Kits ferramental</div>
         <span style={styles.cardIcon}><DashboardIcon iconKey="kits" /></span>
       </div>
       <div style={styles.kitRowsWrap}>
@@ -4487,10 +4487,12 @@ const styles = {
     padding: 12,
     marginBottom: 16,
     borderRadius: 10,
-    border: "1px solid #cbd5e1", boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+    border: "1px solid #cbd5e1",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
     boxSizing: "border-box",
     fontSize: 14,
     background: "#fff",
+    color: "#0f172a",
   },
   inputCompact: {
     minWidth: 140,
@@ -4516,19 +4518,24 @@ const styles = {
     padding: "12px 18px",
     borderRadius: 10,
     border: 0,
-    background: "#0f172a",
+    background: "linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%)",
     color: "#ffffff",
     cursor: "pointer",
     fontSize: 14,
+    fontWeight: 700,
+    letterSpacing: 0.1,
+    boxShadow: "0 6px 14px rgba(29,78,216,0.25)",
   },
   secondaryButtonInline: {
     padding: "12px 18px",
     borderRadius: 10,
-    border: "1px solid #cbd5e1", boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
-    background: "#ffffff",
-    color: "#0f172a",
+    border: "1px solid #bfdbfe",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+    background: "#eff6ff",
+    color: "#1e3a8a",
     cursor: "pointer",
     fontSize: 14,
+    fontWeight: 600,
   },
   disabledButton: {
     opacity: 0.6,
@@ -4546,18 +4553,21 @@ const styles = {
     padding: "8px 12px",
     borderRadius: 8,
     border: 0,
-    background: "#dc2626",
+    background: "#b91c1c",
     color: "#ffffff",
     cursor: "pointer",
+    fontWeight: 700,
   },
   fileButton: {
     padding: "12px 18px",
     borderRadius: 10,
-    border: "1px solid #cbd5e1", boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
-    background: "#ffffff",
-    color: "#0f172a",
+    border: "1px solid #bfdbfe",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+    background: "#eff6ff",
+    color: "#1e3a8a",
     cursor: "pointer",
     fontSize: 14,
+    fontWeight: 600,
     display: "inline-flex",
     alignItems: "center",
   },
@@ -4597,8 +4607,8 @@ const styles = {
   pageTitle: { margin: 0, color: "#0f172a" },
   topbarSub: { color: "#64748b", fontSize: 14, marginTop: 6 },
   logoutButton: { padding: "10px 16px", borderRadius: 10, border: 0, background: "#0f172a", color: "#ffffff", cursor: "pointer" },
-  cardsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 },
-  card: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 16px 36px rgba(15,23,42,0.08)", minHeight: 120, border: "1px solid #e2e8f0", transition: "transform 0.2s ease" },
+  cardsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 },
+  card: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 12px 28px rgba(15,23,42,0.08)", minHeight: 120, border: "1px solid #dbe5f1", transition: "transform 0.2s ease" },
   cardClickable: { cursor: "pointer", outline: "none" },
   cardHighlight: { border: "2px solid #fecaca" },
   cardTitleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 },
@@ -4622,7 +4632,7 @@ const styles = {
   },
   kitRowLabel: { fontSize: 13, color: "#334155" },
   kitRowValue: { fontSize: 18, color: "#0f172a" },
-  section: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 16px 36px rgba(15,23,42,0.08)", marginTop: 24, border: "1px solid #e2e8f0" },
+  section: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 12px 28px rgba(15,23,42,0.08)", marginTop: 24, border: "1px solid #dbe5f1" },
   sectionMini: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, marginTop: 16, marginBottom: 16 },
   sectionMiniTitle: { marginTop: 0, marginBottom: 16, color: "#0f172a" },
   sectionTitle: { marginTop: 0, color: "#0f172a" },
@@ -4672,8 +4682,8 @@ const styles = {
   warningText: { color: "#9a3412", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 10, padding: "8px 10px", marginBottom: 12, fontSize: 13 },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 },
   tableWrap: { marginTop: 24, overflowX: "auto" },
-  table: { width: "100%", borderCollapse: "collapse" },
-  th: { textAlign: "left", padding: 12, borderBottom: "1px solid #e2e8f0", color: "#334155", fontSize: 14, verticalAlign: "top" },
+  table: { width: "100%", borderCollapse: "separate", borderSpacing: 0 },
+  th: { textAlign: "left", padding: 12, borderBottom: "1px solid #dbe5f1", background: "#f8fafc", color: "#334155", fontSize: 13, letterSpacing: 0.2, textTransform: "uppercase", verticalAlign: "top" },
   td: { padding: 12, borderBottom: "1px solid #e2e8f0", fontSize: 14, color: "#0f172a", verticalAlign: "top" },
   minimosLista: { display: "flex", flexDirection: "column", gap: 4, minWidth: 240 },
   minimoLinha: { fontSize: 12, color: "#334155" },
