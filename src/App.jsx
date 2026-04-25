@@ -1114,6 +1114,50 @@ export default function App() {
     ccsDisponiveisDashboard,
   ]);
 
+  const faltantesPorTipoKit = useMemo(() => {
+    const ccFiltroAtivo = String(dashboardFiltroCc || "").trim();
+    const matchFiltroCc = (cc) => !ccFiltroAtivo || cc === ccFiltroAtivo;
+    const ccsDashboard = ccsDisponiveisDashboard.filter((cc) => matchFiltroCc(cc));
+
+    const estoquePorCcItem = {};
+    estoqueGeral.forEach((registro) => {
+      estoquePorCcItem[`${registro.cc}-${Number(registro.itemId)}`] = Number(registro.estoque || 0);
+    });
+
+    const buildFaltantes = (qtdField) => {
+      const itensDoKit = itens.filter((item) => Number(item[qtdField] ?? 0) > 0);
+      if (itensDoKit.length === 0) return [];
+      const faltantes = [];
+      ccsDashboard.forEach((cc) => {
+        itensDoKit.forEach((item) => {
+          const qtdPorKit = Number(item[qtdField] || 0);
+          const estoqueAtual = Number(estoquePorCcItem[`${cc}-${Number(item.id)}`] || 0);
+          const faltanteParaUmKit = Math.max(0, qtdPorKit - estoqueAtual);
+          if (faltanteParaUmKit > 0) {
+            faltantes.push({
+              cc,
+              itemId: Number(item.id),
+              itemNome: item.nome || `Item #${item.id}`,
+              qtdPorKit,
+              estoqueAtual,
+              faltanteParaUmKit,
+            });
+          }
+        });
+      });
+      return faltantes.sort((a, b) => {
+        const ccCompare = a.cc.localeCompare(b.cc, "pt-BR");
+        if (ccCompare !== 0) return ccCompare;
+        return a.itemNome.localeCompare(b.itemNome, "pt-BR");
+      });
+    };
+
+    return {
+      mdu: buildFaltantes("qtdKitMdu"),
+      inst: buildFaltantes("qtdKitInst"),
+    };
+  }, [dashboardFiltroCc, ccsDisponiveisDashboard, estoqueGeral, itens]);
+
   const login = () => {
     if (carregandoUsuarios) {
       alert("Aguarde, carregando usuários...");
@@ -2569,6 +2613,50 @@ export default function App() {
                   </table>
                 </div>
               </div>
+            ) : dashboardModo === "kit-mdu-detalhe" || dashboardModo === "kit-inst-detalhe" ? (
+              <div style={styles.section}>
+                <div style={styles.sectionHeaderLine}>
+                  <h3 style={styles.sectionTitle}>
+                    {dashboardModo === "kit-mdu-detalhe"
+                      ? "Itens faltantes para completar KIT MDU"
+                      : "Itens faltantes para completar KIT INST."}
+                  </h3>
+                  <button type="button" style={styles.secondaryButtonInline} onClick={() => setDashboardModo("resumo")}>
+                    Voltar ao dashboard
+                  </button>
+                </div>
+                <p style={styles.mutedText}>
+                  Lista por centro de custo dos itens que faltam em estoque para montar pelo menos 1 kit completo.
+                </p>
+                <div style={styles.tableWrap}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}>CC</th>
+                        <th style={styles.th}>Item</th>
+                        <th style={styles.th}>Qtd por kit</th>
+                        <th style={styles.th}>Estoque atual</th>
+                        <th style={styles.th}>Falta comprar</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(dashboardModo === "kit-mdu-detalhe" ? faltantesPorTipoKit.mdu : faltantesPorTipoKit.inst).length === 0 ? (
+                        <tr><td style={styles.td} colSpan={5}>Nenhum item faltante para completar 1 kit no filtro atual.</td></tr>
+                      ) : (
+                        (dashboardModo === "kit-mdu-detalhe" ? faltantesPorTipoKit.mdu : faltantesPorTipoKit.inst).map((registro, index) => (
+                          <tr key={`${registro.cc}-${registro.itemId}-${index}`}>
+                            <td style={styles.td}>{registro.cc}</td>
+                            <td style={styles.td}>{registro.itemNome}</td>
+                            <td style={styles.td}>{registro.qtdPorKit}</td>
+                            <td style={styles.td}>{registro.estoqueAtual}</td>
+                            <td style={{ ...styles.td, color: "#b45309", fontWeight: 700 }}>{registro.faltanteParaUmKit}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             ) : (
               <>
             <div style={{ ...styles.section, marginTop: 0, marginBottom: 16 }}>
@@ -2602,14 +2690,16 @@ export default function App() {
                 onClick={() => setDashboardModo("criticos-detalhe")}
               />
               <MetricCard
-                titulo="Kits MDU disponíveis para entrega"
+                titulo="Kits MDU disponíveis para entrega (clique para ver faltantes)"
                 valor={indicadoresDashboard.totalKitsDisponiveisMdu}
                 iconKey="kits"
+                onClick={() => setDashboardModo("kit-mdu-detalhe")}
               />
               <MetricCard
-                titulo="Kits INST. disponíveis para entrega"
+                titulo="Kits INST. disponíveis para entrega (clique para ver faltantes)"
                 valor={indicadoresDashboard.totalKitsDisponiveisInst}
                 iconKey="kits"
+                onClick={() => setDashboardModo("kit-inst-detalhe")}
               />
               <MetricCard
                 titulo="Valor de referência KIT MDU (cadastro)"
