@@ -1158,6 +1158,13 @@ export default function App() {
     };
   }, [dashboardFiltroCc, ccsDisponiveisDashboard, estoqueGeral, itens]);
 
+  const faltantesKitVisiveis = useMemo(() => {
+    const listaBase = dashboardModo === "kit-mdu-detalhe" ? faltantesPorTipoKit.mdu : faltantesPorTipoKit.inst;
+    const ccFiltroAtivo = String(dashboardFiltroCc || "").trim();
+    if (!ccFiltroAtivo) return listaBase;
+    return listaBase.filter((registro) => registro.cc === ccFiltroAtivo);
+  }, [dashboardModo, dashboardFiltroCc, faltantesPorTipoKit]);
+
   const login = () => {
     if (carregandoUsuarios) {
       alert("Aguarde, carregando usuários...");
@@ -2628,6 +2635,11 @@ export default function App() {
                 <p style={styles.mutedText}>
                   Lista por centro de custo dos itens que faltam em estoque para montar pelo menos 1 kit completo.
                 </p>
+                {!!dashboardFiltroCc && (
+                  <p style={{ ...styles.mutedText, fontWeight: 600 }}>
+                    Filtro ativo: {dashboardFiltroCc}
+                  </p>
+                )}
                 <div style={styles.tableWrap}>
                   <table style={styles.table}>
                     <thead>
@@ -2640,10 +2652,10 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(dashboardModo === "kit-mdu-detalhe" ? faltantesPorTipoKit.mdu : faltantesPorTipoKit.inst).length === 0 ? (
+                      {faltantesKitVisiveis.length === 0 ? (
                         <tr><td style={styles.td} colSpan={5}>Nenhum item faltante para completar 1 kit no filtro atual.</td></tr>
                       ) : (
-                        (dashboardModo === "kit-mdu-detalhe" ? faltantesPorTipoKit.mdu : faltantesPorTipoKit.inst).map((registro, index) => (
+                        faltantesKitVisiveis.map((registro, index) => (
                           <tr key={`${registro.cc}-${registro.itemId}-${index}`}>
                             <td style={styles.td}>{registro.cc}</td>
                             <td style={styles.td}>{registro.itemNome}</td>
