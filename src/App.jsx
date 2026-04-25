@@ -1021,14 +1021,26 @@ export default function App() {
       estoqueGeral.forEach((r) => {
         estoqueAlmoxarifadoPorCcItem[`${r.cc}-${Number(r.itemId)}`] = Number(r.estoque || 0);
       });
-      return ccsDashboard.reduce((sumCc, cc) => {
-        const kitsPorItem = itensComKit.map((item) => {
-          const qtd = Number(item[qtdField] ?? 0);
-          const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
-          return Math.floor(est / qtd);
-        });
-        return sumCc + Math.min(...kitsPorItem);
-      }, 0);
+      if (ccFiltroAtivo) {
+        return ccsDashboard.reduce((sumCc, cc) => {
+          const kitsPorItem = itensComKit.map((item) => {
+            const qtd = Number(item[qtdField] ?? 0);
+            const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
+            return Math.floor(est / qtd);
+          });
+          return sumCc + Math.min(...kitsPorItem);
+        }, 0);
+      }
+      // Sem filtro de CC: soma o estoque de todos os CCs visiveis antes de calcular os kits.
+      const kitsPorItemGlobal = itensComKit.map((item) => {
+        const qtd = Number(item[qtdField] ?? 0);
+        const estoqueTotalItem = ccsDashboard.reduce(
+          (acc, cc) => acc + Number(estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0),
+          0
+        );
+        return Math.floor(estoqueTotalItem / qtd);
+      });
+      return Math.min(...kitsPorItemGlobal);
     };
 
     const itensCriticos = estoqueGeral.filter(
@@ -1153,14 +1165,35 @@ export default function App() {
       });
       if (itensDoKit.length === 0) return [];
       const faltantes = [];
-      ccsDashboard.forEach((cc) => {
+      if (ccFiltroAtivo) {
+        ccsDashboard.forEach((cc) => {
+          itensDoKit.forEach((item) => {
+            const qtdPorKit = Number(item[qtdField] || 0);
+            const estoqueAtual = Number(estoquePorCcItem[`${cc}-${Number(item.id)}`] || 0);
+            const faltanteParaUmKit = Math.max(0, qtdPorKit - estoqueAtual);
+            if (faltanteParaUmKit > 0) {
+              faltantes.push({
+                cc,
+                itemId: Number(item.id),
+                itemNome: item.nome || `Item #${item.id}`,
+                qtdPorKit,
+                estoqueAtual,
+                faltanteParaUmKit,
+              });
+            }
+          });
+        });
+      } else {
         itensDoKit.forEach((item) => {
           const qtdPorKit = Number(item[qtdField] || 0);
-          const estoqueAtual = Number(estoquePorCcItem[`${cc}-${Number(item.id)}`] || 0);
+          const estoqueAtual = ccsDashboard.reduce(
+            (acc, cc) => acc + Number(estoquePorCcItem[`${cc}-${Number(item.id)}`] || 0),
+            0
+          );
           const faltanteParaUmKit = Math.max(0, qtdPorKit - estoqueAtual);
           if (faltanteParaUmKit > 0) {
             faltantes.push({
-              cc,
+              cc: "Todos os CCs",
               itemId: Number(item.id),
               itemNome: item.nome || `Item #${item.id}`,
               qtdPorKit,
@@ -1169,7 +1202,7 @@ export default function App() {
             });
           }
         });
-      });
+      }
       return faltantes.sort((a, b) => {
         const ccCompare = a.cc.localeCompare(b.cc, "pt-BR");
         if (ccCompare !== 0) return ccCompare;
