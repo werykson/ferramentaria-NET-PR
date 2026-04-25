@@ -116,6 +116,8 @@ const ITEM_HEADER_VALOR = "VALOR";
 const ITEM_HEADER_QTD_KIT = "QTD_KIT";
 const ITEM_HEADER_QTD_KIT_MDU = "QTD_KIT_MDU";
 const ITEM_HEADER_QTD_KIT_INST = "QTD_KIT_INST";
+const ITEM_HEADER_FLAGS_KIT = "FLAGS_KIT";
+const KIT_FLAGS = ["HFC", "GPON", "MDU"];
 const ITEM_MINIMO_HEADERS = CCS.map((cc) => ({
   cc,
   header: `MINIMO_${ccToHeaderToken(cc)}`,
@@ -131,6 +133,7 @@ const emptyItemForm = () => ({
   valor: "",
   qtdKitMdu: "",
   qtdKitInst: "",
+  kitFlags: [],
   minimos: emptyMinimos(),
 });
 const emptyTecnicoForm = () => ({ nome: "", cc: "" });
@@ -151,6 +154,31 @@ const emptyTriForm = () => ({
 });
 
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+function parseKitFlags(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((v) => String(v || "").trim().toUpperCase()).filter((v) => KIT_FLAGS.includes(v)))];
+  }
+  if (value && typeof value === "object") {
+    return KIT_FLAGS.filter((flag) => value[flag] === true || value[flag] === 1 || value[flag] === "1");
+  }
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  return [
+    ...new Set(
+      raw
+        .split(/[;,|/\\\s]+/)
+        .map((v) => String(v || "").trim().toUpperCase())
+        .filter((v) => KIT_FLAGS.includes(v))
+    ),
+  ];
+}
+
+function itemHasKitFlag(item, flag) {
+  const flags = parseKitFlags(item?.kitFlags);
+  if (flags.length === 0) return true; // Universal: sem flag entra em todos os kits.
+  return flags.includes(flag);
+}
 
 function safeLocalStorageGet(key, fallback) {
   try {
@@ -649,11 +677,14 @@ export default function App() {
     setItens(
       (data || []).map((item) => {
         const legacy = Number(item.qtd_kit ?? 0);
+        const flagsFromMinimos = parseKitFlags(item.minimos?.__flagsKit);
+        const flagsFromColumn = parseKitFlags(item.flags_kit ?? item.kit_flags);
         return {
           ...item,
           valor: Number(item.valor || 0),
           qtdKitMdu: Number(item.qtd_kit_mdu ?? legacy),
           qtdKitInst: Number(item.qtd_kit_inst ?? legacy),
+          kitFlags: flagsFromColumn.length ? flagsFromColumn : flagsFromMinimos,
           minimos: item.minimos || {},
         };
       })
@@ -980,6 +1011,25 @@ export default function App() {
     const ccFiltroAtivo = String(dashboardFiltroCc || "").trim();
     const matchFiltroCc = (cc) => !ccFiltroAtivo || cc === ccFiltroAtivo;
     const ccsDashboard = ccsDisponiveisDashboard.filter((cc) => matchFiltroCc(cc));
+    const calcularTotalKits = (qtdField, itemPredicate = null) => {
+      const itensComKit = itens.filter((item) => {
+        if (Number(item[qtdField] ?? 0) <= 0) return false;
+        return itemPredicate ? itemPredicate(item) : true;
+      });
+      if (itensComKit.length === 0) return 0;
+      const estoqueAlmoxarifadoPorCcItem = {};
+      estoqueGeral.forEach((r) => {
+        estoqueAlmoxarifadoPorCcItem[`${r.cc}-${Number(r.itemId)}`] = Number(r.estoque || 0);
+      });
+      return ccsDashboard.reduce((sumCc, cc) => {
+        const kitsPorItem = itensComKit.map((item) => {
+          const qtd = Number(item[qtdField] ?? 0);
+          const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
+          return Math.floor(est / qtd);
+        });
+        return sumCc + Math.min(...kitsPorItem);
+      }, 0);
+    };
 
     const itensCriticos = estoqueGeral.filter(
       (registro) =>
@@ -1046,38 +1096,10 @@ export default function App() {
       top10ItensSubstituidos: rankingSubstituicoes.slice(0, 10),
       top10TecnicosSubstituidores: rankingSubstituicoesTecnicos.slice(0, 10),
       totalItens: itens.length,
-      totalKitsDisponiveisMdu: (() => {
-        const itensComKit = itens.filter((item) => Number(item.qtdKitMdu ?? 0) > 0);
-        if (itensComKit.length === 0) return 0;
-        const estoqueAlmoxarifadoPorCcItem = {};
-        estoqueGeral.forEach((r) => {
-          estoqueAlmoxarifadoPorCcItem[`${r.cc}-${Number(r.itemId)}`] = Number(r.estoque || 0);
-        });
-        return ccsDashboard.reduce((sumCc, cc) => {
-          const kitsPorItem = itensComKit.map((item) => {
-            const qtd = Number(item.qtdKitMdu ?? 0);
-            const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
-            return Math.floor(est / qtd);
-          });
-          return sumCc + Math.min(...kitsPorItem);
-        }, 0);
-      })(),
-      totalKitsDisponiveisInst: (() => {
-        const itensComKit = itens.filter((item) => Number(item.qtdKitInst ?? 0) > 0);
-        if (itensComKit.length === 0) return 0;
-        const estoqueAlmoxarifadoPorCcItem = {};
-        estoqueGeral.forEach((r) => {
-          estoqueAlmoxarifadoPorCcItem[`${r.cc}-${Number(r.itemId)}`] = Number(r.estoque || 0);
-        });
-        return ccsDashboard.reduce((sumCc, cc) => {
-          const kitsPorItem = itensComKit.map((item) => {
-            const qtd = Number(item.qtdKitInst ?? 0);
-            const est = estoqueAlmoxarifadoPorCcItem[`${cc}-${Number(item.id)}`] ?? 0;
-            return Math.floor(est / qtd);
-          });
-          return sumCc + Math.min(...kitsPorItem);
-        }, 0);
-      })(),
+      totalKitsDisponiveisMdu: calcularTotalKits("qtdKitMdu", (item) => itemHasKitFlag(item, "MDU")),
+      totalKitsDisponiveisInst: calcularTotalKits("qtdKitInst"),
+      totalKitsDisponiveisHfc: calcularTotalKits("qtdKitInst", (item) => itemHasKitFlag(item, "HFC")),
+      totalKitsDisponiveisGpon: calcularTotalKits("qtdKitInst", (item) => itemHasKitFlag(item, "GPON")),
       valorReferenciaKitsMdu: itens.reduce((acc, item) => {
         const qtd = Number(item.qtdKitMdu ?? 0);
         if (qtd <= 0) return acc;
@@ -1124,8 +1146,11 @@ export default function App() {
       estoquePorCcItem[`${registro.cc}-${Number(registro.itemId)}`] = Number(registro.estoque || 0);
     });
 
-    const buildFaltantes = (qtdField) => {
-      const itensDoKit = itens.filter((item) => Number(item[qtdField] ?? 0) > 0);
+    const buildFaltantes = (qtdField, itemPredicate = null) => {
+      const itensDoKit = itens.filter((item) => {
+        if (Number(item[qtdField] ?? 0) <= 0) return false;
+        return itemPredicate ? itemPredicate(item) : true;
+      });
       if (itensDoKit.length === 0) return [];
       const faltantes = [];
       ccsDashboard.forEach((cc) => {
@@ -1155,11 +1180,17 @@ export default function App() {
     return {
       mdu: buildFaltantes("qtdKitMdu"),
       inst: buildFaltantes("qtdKitInst"),
+      hfc: buildFaltantes("qtdKitInst", (item) => itemHasKitFlag(item, "HFC")),
+      gpon: buildFaltantes("qtdKitInst", (item) => itemHasKitFlag(item, "GPON")),
+      mduClassificado: buildFaltantes("qtdKitMdu", (item) => itemHasKitFlag(item, "MDU")),
     };
   }, [dashboardFiltroCc, ccsDisponiveisDashboard, estoqueGeral, itens]);
 
   const faltantesKitVisiveis = useMemo(() => {
-    const listaBase = dashboardModo === "kit-mdu-detalhe" ? faltantesPorTipoKit.mdu : faltantesPorTipoKit.inst;
+    let listaBase = faltantesPorTipoKit.inst;
+    if (dashboardModo === "kit-hfc-detalhe") listaBase = faltantesPorTipoKit.hfc;
+    else if (dashboardModo === "kit-gpon-detalhe") listaBase = faltantesPorTipoKit.gpon;
+    else if (dashboardModo === "kit-mdu-detalhe") listaBase = faltantesPorTipoKit.mduClassificado;
     const ccFiltroAtivo = String(dashboardFiltroCc || "").trim();
     if (!ccFiltroAtivo) return listaBase;
     return listaBase.filter((registro) => registro.cc === ccFiltroAtivo);
@@ -1259,13 +1290,15 @@ export default function App() {
     }
 
     const payload = {
+      minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemForm.minimos[cc] || 0)])),
       codigo: itemForm.codigo.trim(),
       nome: itemForm.nome.trim(),
       valor: Number(itemForm.valor || 0),
       qtd_kit_mdu: Number(itemForm.qtdKitMdu || 0),
       qtd_kit_inst: Number(itemForm.qtdKitInst || 0),
-      minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemForm.minimos[cc] || 0)])),
     };
+    const kitFlags = parseKitFlags(itemForm.kitFlags);
+    if (kitFlags.length) payload.minimos.__flagsKit = kitFlags;
 
     const { error } = await supabase.from("itens").insert([payload]);
     if (error) {
@@ -1303,13 +1336,15 @@ export default function App() {
       return;
     }
     const payload = {
+      minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemEdicaoDraft.minimos[cc] || 0)])),
       codigo: itemEdicaoDraft.codigo.trim(),
       nome: itemEdicaoDraft.nome.trim(),
       valor: Number(itemEdicaoDraft.valor || 0),
       qtd_kit_mdu: Number(itemEdicaoDraft.qtdKitMdu || 0),
       qtd_kit_inst: Number(itemEdicaoDraft.qtdKitInst || 0),
-      minimos: Object.fromEntries(CCS.map((cc) => [cc, Number(itemEdicaoDraft.minimos[cc] || 0)])),
     };
+    const kitFlags = parseKitFlags(itemEdicaoDraft.kitFlags);
+    if (kitFlags.length) payload.minimos.__flagsKit = kitFlags;
     const { error } = await supabase.from("itens").update(payload).eq("id", itemEditandoId);
     if (error) {
       console.error(error);
@@ -1335,6 +1370,7 @@ export default function App() {
         item.qtdKitInst !== undefined && item.qtdKitInst !== null
           ? String(item.qtdKitInst)
           : String(item.qtd_kit_inst ?? ""),
+      kitFlags: parseKitFlags(item.kitFlags ?? item.flags_kit ?? item.minimos?.__flagsKit),
       minimos: Object.fromEntries(CCS.map((cc) => [cc, String(item.minimos?.[cc] ?? "")])),
     });
   };
@@ -1351,6 +1387,7 @@ export default function App() {
       [ITEM_HEADER_VALOR]: Number(item.valor || 0),
       [ITEM_HEADER_QTD_KIT_MDU]: Number(item.qtdKitMdu ?? item.qtd_kit_mdu ?? 0),
       [ITEM_HEADER_QTD_KIT_INST]: Number(item.qtdKitInst ?? item.qtd_kit_inst ?? 0),
+      [ITEM_HEADER_FLAGS_KIT]: parseKitFlags(item.kitFlags ?? item.flags_kit ?? item.minimos?.__flagsKit).join(","),
       ...Object.fromEntries(
         ITEM_MINIMO_HEADERS.map(({ cc, header }) => [header, Number(item.minimos?.[cc] || 0)])
       ),
@@ -1365,6 +1402,7 @@ export default function App() {
       [ITEM_HEADER_VALOR]: 0,
       [ITEM_HEADER_QTD_KIT_MDU]: 0,
       [ITEM_HEADER_QTD_KIT_INST]: 0,
+      [ITEM_HEADER_FLAGS_KIT]: "",
       ...Object.fromEntries(ITEM_MINIMO_HEADERS.map(({ header }) => [header, 0])),
     };
     downloadWorkbook("modelo_itens_ferramentaria.xlsx", "Itens", [modelo]);
@@ -1423,16 +1461,19 @@ export default function App() {
             qtd_kit_inst = legacyQ;
           }
           return {
-            codigo: String(readExcelValue(row, [ITEM_HEADER_CODIGO, "codigo"])).trim(),
-            nome: String(readExcelValue(row, [ITEM_HEADER_NOME, "nome"])).trim(),
-            valor: Number(readExcelValue(row, [ITEM_HEADER_VALOR, "valor"]) || 0),
-            qtd_kit_mdu,
-            qtd_kit_inst,
             minimos: Object.fromEntries(
               ITEM_MINIMO_HEADERS.map(({ cc, header }) => [
                 cc,
                 Number(readExcelValue(row, [header, cc, `MINIMO_${cc}`, `minimo_${cc}`]) || 0),
               ])
+            ),
+            codigo: String(readExcelValue(row, [ITEM_HEADER_CODIGO, "codigo"])).trim(),
+            nome: String(readExcelValue(row, [ITEM_HEADER_NOME, "nome"])).trim(),
+            valor: Number(readExcelValue(row, [ITEM_HEADER_VALOR, "valor"]) || 0),
+            qtd_kit_mdu,
+            qtd_kit_inst,
+            kitFlags: parseKitFlags(
+              readExcelValue(row, [ITEM_HEADER_FLAGS_KIT, "flags_kit", "kit_flags", "flagskit", "tecnologia"])
             ),
           };
         });
@@ -1457,13 +1498,16 @@ export default function App() {
       const inserir = [];
       const atualizar = [];
       for (const row of unicos) {
+        const flags = parseKitFlags(row.kitFlags);
+        const minimosComFlags = { ...row.minimos };
+        if (flags.length) minimosComFlags.__flagsKit = flags;
         const reg = {
           codigo: row.codigo,
           nome: row.nome,
           valor: row.valor,
           qtd_kit_mdu: row.qtd_kit_mdu,
           qtd_kit_inst: row.qtd_kit_inst,
-          minimos: row.minimos,
+          minimos: minimosComFlags,
         };
         const id = idPorCodigo[row.codigo];
         if (id) atualizar.push({ id, ...reg });
@@ -2620,12 +2664,16 @@ export default function App() {
                   </table>
                 </div>
               </div>
-            ) : dashboardModo === "kit-mdu-detalhe" || dashboardModo === "kit-inst-detalhe" ? (
+            ) : ["kit-mdu-detalhe", "kit-inst-detalhe", "kit-hfc-detalhe", "kit-gpon-detalhe"].includes(dashboardModo) ? (
               <div style={styles.section}>
                 <div style={styles.sectionHeaderLine}>
                   <h3 style={styles.sectionTitle}>
                     {dashboardModo === "kit-mdu-detalhe"
                       ? "Itens faltantes para completar KIT MDU"
+                      : dashboardModo === "kit-hfc-detalhe"
+                        ? "Itens faltantes para completar KIT HFC"
+                        : dashboardModo === "kit-gpon-detalhe"
+                          ? "Itens faltantes para completar KIT GPON"
                       : "Itens faltantes para completar KIT INST."}
                   </h3>
                   <button type="button" style={styles.secondaryButtonInline} onClick={() => setDashboardModo("resumo")}>
@@ -2701,17 +2749,15 @@ export default function App() {
                 iconKey="critico"
                 onClick={() => setDashboardModo("criticos-detalhe")}
               />
-              <MetricCard
-                titulo="Kits MDU disponíveis para entrega (clique para ver faltantes)"
-                valor={indicadoresDashboard.totalKitsDisponiveisMdu}
-                iconKey="kits"
-                onClick={() => setDashboardModo("kit-mdu-detalhe")}
-              />
-              <MetricCard
-                titulo="Kits INST. disponíveis para entrega (clique para ver faltantes)"
-                valor={indicadoresDashboard.totalKitsDisponiveisInst}
-                iconKey="kits"
-                onClick={() => setDashboardModo("kit-inst-detalhe")}
+              <KitsFerramentalCard
+                inst={indicadoresDashboard.totalKitsDisponiveisInst}
+                hfc={indicadoresDashboard.totalKitsDisponiveisHfc}
+                gpon={indicadoresDashboard.totalKitsDisponiveisGpon}
+                mdu={indicadoresDashboard.totalKitsDisponiveisMdu}
+                onOpenInst={() => setDashboardModo("kit-inst-detalhe")}
+                onOpenHfc={() => setDashboardModo("kit-hfc-detalhe")}
+                onOpenGpon={() => setDashboardModo("kit-gpon-detalhe")}
+                onOpenMdu={() => setDashboardModo("kit-mdu-detalhe")}
               />
               <MetricCard
                 titulo="Valor de referência KIT MDU (cadastro)"
@@ -2925,6 +2971,30 @@ export default function App() {
                     onChange={(e) => setItemForm({ ...itemForm, qtdKitInst: e.target.value })}
                   />
                 </div>
+                <div style={styles.sectionMini}>
+                  <h4 style={styles.sectionMiniTitle}>Flags de tecnologia/tipo do item</h4>
+                  <div style={styles.actionRow}>
+                    {KIT_FLAGS.map((flag) => (
+                      <label key={flag} style={{ ...styles.permissionBadge, ...styles.permissionBadgeOff }}>
+                        <input
+                          type="checkbox"
+                          checked={parseKitFlags(itemForm.kitFlags).includes(flag)}
+                          onChange={(e) => {
+                            const atual = parseKitFlags(itemForm.kitFlags);
+                            const proximo = e.target.checked
+                              ? [...new Set([...atual, flag])]
+                              : atual.filter((v) => v !== flag);
+                            setItemForm((prev) => ({ ...prev, kitFlags: proximo }));
+                          }}
+                        />
+                        <span style={{ marginLeft: 6 }}>{flag}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p style={styles.mutedText}>
+                    Sem nenhuma flag selecionada = item universal (entra em HFC, GPON e MDU).
+                  </p>
+                </div>
                 <p style={styles.permissionHint}>
                   Informe quantas unidades <strong>deste item</strong> entram em cada tipo de kit. Itens com quantidade zero
                   naquele kit não entram na composição nem no cálculo do dashboard para aquele kit.
@@ -2968,15 +3038,16 @@ export default function App() {
                     <th style={styles.th}>Valor</th>
                     <th style={styles.th}>Qtd KIT MDU</th>
                     <th style={styles.th}>Qtd KIT INST.</th>
+                    <th style={styles.th}>Flags</th>
                     <th style={styles.th}>Mínimos por CC</th>
                     <th style={styles.th}>Ação</th>
                   </tr>
                 </thead>
                 <tbody>
                   {itens.length === 0 ? (
-                    <tr><td style={styles.td} colSpan={7}>Nenhum item cadastrado.</td></tr>
+                    <tr><td style={styles.td} colSpan={8}>Nenhum item cadastrado.</td></tr>
                   ) : itensFiltrados.length === 0 ? (
-                    <tr><td style={styles.td} colSpan={7}>Nenhum item encontrado para o filtro informado.</td></tr>
+                    <tr><td style={styles.td} colSpan={8}>Nenhum item encontrado para o filtro informado.</td></tr>
                   ) : (
                     itensFiltrados.map((item) =>
                       itemEditandoId === item.id ? (
@@ -3018,6 +3089,26 @@ export default function App() {
                               value={itemEdicaoDraft.qtdKitInst}
                               onChange={(e) => setItemEdicaoDraft((d) => ({ ...d, qtdKitInst: e.target.value }))}
                             />
+                          </td>
+                          <td style={styles.td}>
+                            <div style={styles.actionRow}>
+                              {KIT_FLAGS.map((flag) => (
+                                <label key={flag} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={parseKitFlags(itemEdicaoDraft.kitFlags).includes(flag)}
+                                    onChange={(e) => {
+                                      const atual = parseKitFlags(itemEdicaoDraft.kitFlags);
+                                      const proximo = e.target.checked
+                                        ? [...new Set([...atual, flag])]
+                                        : atual.filter((v) => v !== flag);
+                                      setItemEdicaoDraft((prev) => ({ ...prev, kitFlags: proximo }));
+                                    }}
+                                  />
+                                  {flag}
+                                </label>
+                              ))}
+                            </div>
                           </td>
                           <td style={styles.td}>
                             <div
@@ -3064,6 +3155,9 @@ export default function App() {
                           <td style={styles.td}>{formatMoney(item.valor)}</td>
                           <td style={styles.td}>{item.qtdKitMdu}</td>
                           <td style={styles.td}>{item.qtdKitInst}</td>
+                          <td style={styles.td}>
+                            {parseKitFlags(item.kitFlags).length ? parseKitFlags(item.kitFlags).join(", ") : "UNIVERSAL"}
+                          </td>
                           <td style={styles.td}>
                             <div style={styles.minimosLista}>
                               {CCS.map((cc) => (
@@ -4174,6 +4268,32 @@ function MetricCard({ titulo, valor, destaque = false, iconKey = null, onClick =
   return <div style={cardStyle}>{inner}</div>;
 }
 
+function KitsFerramentalCard({ inst, hfc, gpon, mdu, onOpenInst, onOpenHfc, onOpenGpon, onOpenMdu }) {
+  const rows = [
+    { key: "INST", valor: inst, onClick: onOpenInst },
+    { key: "HFC", valor: hfc, onClick: onOpenHfc },
+    { key: "GPON", valor: gpon, onClick: onOpenGpon },
+    { key: "MDU", valor: mdu, onClick: onOpenMdu },
+  ];
+  return (
+    <div style={{ ...styles.card, ...styles.kitsFerramentalCard }}>
+      <div style={styles.cardTitleRow}>
+        <div style={styles.cardTitle}>KITS FERRAMENTAL</div>
+        <span style={styles.cardIcon}><DashboardIcon iconKey="kits" /></span>
+      </div>
+      <div style={styles.kitRowsWrap}>
+        {rows.map((row) => (
+          <button key={row.key} type="button" style={styles.kitRowButton} onClick={row.onClick}>
+            <span style={styles.kitRowLabel}>{row.key}</span>
+            <span style={styles.kitRowValue}>{row.valor}</span>
+          </button>
+        ))}
+      </div>
+      <div style={styles.mutedText}>Clique na linha para ver faltantes.</div>
+    </div>
+  );
+}
+
 function SummaryBox({ titulo, valor }) {
   return (
     <div style={styles.summaryBox}>
@@ -4414,6 +4534,22 @@ const styles = {
   cardIcon: { color: "#1d4ed8", lineHeight: 1, display: "inline-flex", alignItems: "center" },
   cardIconSvg: { width: 22, height: 22, display: "block" },
   cardValueSmall: { marginTop: 12, fontSize: 22, fontWeight: 700, color: "#0f172a", lineHeight: 1.25 },
+  kitsFerramentalCard: { minHeight: 220 },
+  kitRowsWrap: { marginTop: 12, display: "grid", gap: 8 },
+  kitRowButton: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    padding: "8px 10px",
+    background: "#f8fafc",
+    color: "#0f172a",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  kitRowLabel: { fontSize: 13, color: "#334155" },
+  kitRowValue: { fontSize: 18, color: "#0f172a" },
   section: { background: "#ffffff", borderRadius: 18, padding: 20, boxShadow: "0 16px 36px rgba(15,23,42,0.08)", marginTop: 24, border: "1px solid #e2e8f0" },
   sectionMini: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, marginTop: 16, marginBottom: 16 },
   sectionMiniTitle: { marginTop: 0, marginBottom: 16, color: "#0f172a" },
