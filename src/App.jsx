@@ -1688,10 +1688,55 @@ export default function App() {
         return;
       }
 
-      const { error } = await supabase.from("tecnicos").insert(payload);
-      if (error) throw error;
+      const dedupPorNome = new Map();
+      payload.forEach((row) => {
+        dedupPorNome.set(normalizeSearchText(row.nome), row);
+      });
+      const payloadUnico = Array.from(dedupPorNome.values());
+
+      const { data: tecnicosExistentes, error: existentesError } = await supabase
+        .from("tecnicos")
+        .select("id,nome,cc");
+      if (existentesError) throw existentesError;
+
+      const existentesPorNome = new Map();
+      (tecnicosExistentes || []).forEach((tec) => {
+        const chave = normalizeSearchText(tec.nome);
+        if (!existentesPorNome.has(chave)) existentesPorNome.set(chave, tec);
+      });
+
+      const paraAtualizar = [];
+      const paraInserir = [];
+      payloadUnico.forEach((row) => {
+        const existente = existentesPorNome.get(normalizeSearchText(row.nome));
+        if (existente) paraAtualizar.push({ id: existente.id, ...row, ccAtual: existente.cc, nomeAtual: existente.nome });
+        else paraInserir.push(row);
+      });
+
+      let atualizados = 0;
+      for (const row of paraAtualizar) {
+        const alterouNome = String(row.nomeAtual || "").trim() !== row.nome;
+        const alterouCC = String(row.ccAtual || "").trim() !== row.cc;
+        if (!alterouNome && !alterouCC) continue;
+        const { error: upErr } = await supabase
+          .from("tecnicos")
+          .update({ nome: row.nome, cc: row.cc })
+          .eq("id", row.id);
+        if (upErr) throw upErr;
+        atualizados += 1;
+      }
+
+      if (paraInserir.length) {
+        const { error: insErr } = await supabase.from("tecnicos").insert(paraInserir);
+        if (insErr) throw insErr;
+      }
+
       await buscarTecnicos();
-      alert(`${payload.length} técnico(s) importado(s) com sucesso.`);
+      alert(
+        `Importação concluída: ${paraInserir.length} novo(s), ${atualizados} atualizado(s) e ${
+          payload.length - payloadUnico.length
+        } duplicado(s) na planilha ignorado(s).`
+      );
     } catch (error) {
       console.error(error);
       alert("Erro ao importar planilha de técnicos.");
