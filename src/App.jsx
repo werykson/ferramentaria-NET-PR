@@ -1338,7 +1338,7 @@ export default function App() {
           valorTotal: quantidade * valorUnitario,
         };
       })
-      .sort((a, b) => b.valorTotal - a.valorTotal);
+      .sort((a, b) => String(a.itemNome || "").localeCompare(String(b.itemNome || ""), "pt-BR"));
 
     if (!itens.length) return null;
 
