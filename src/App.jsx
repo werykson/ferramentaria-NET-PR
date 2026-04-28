@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "./supabaseClient";
 import { theme } from "./theme.js";
@@ -449,15 +449,6 @@ function downloadWorkbook(filename, sheetName, rows) {
   XLSX.writeFile(wb, filename);
 }
 
-function downloadWorkbookSheets(filename, sheets) {
-  const wb = XLSX.utils.book_new();
-  sheets.forEach((sheet) => {
-    const ws = XLSX.utils.json_to_sheet(sheet.rows);
-    XLSX.utils.book_append_sheet(wb, ws, sheet.name);
-  });
-  XLSX.writeFile(wb, filename);
-}
-
 function readExcelValue(row, aliases) {
   const normalized = Object.fromEntries(
     Object.entries(row || {}).map(([key, value]) => [normalizeHeaderKey(key), value])
@@ -626,6 +617,7 @@ export default function App() {
   const [usuarioExpandidoId, setUsuarioExpandidoId] = useState(null);
   const [buscaUsuario, setBuscaUsuario] = useState("");
   const [buscaItem, setBuscaItem] = useState("");
+  const ultimoRefreshPorPaginaRef = useRef({ pagina: "", ts: 0 });
 
   useEffect(() => {
     if (pagina === "usuarios" && !roleCanManageUsers(usuarioAtual)) {
@@ -640,6 +632,21 @@ export default function App() {
   useEffect(() => {
     if (pagina !== "itens") setItemEditandoId(null);
   }, [pagina]);
+
+  useEffect(() => {
+    if (!usuarioAtual) return;
+    if (carregando) return;
+    if (!["dashboard", "estoque", "movimentacoes"].includes(pagina)) return;
+
+    const agora = Date.now();
+    const ultimo = ultimoRefreshPorPaginaRef.current;
+    const refreshMuitoRecente =
+      ultimo?.pagina === pagina && agora - Number(ultimo?.ts || 0) < 1200;
+    if (refreshMuitoRecente) return;
+
+    ultimoRefreshPorPaginaRef.current = { pagina, ts: agora };
+    buscarMovimentacoes();
+  }, [pagina, usuarioAtual, carregando]);
 
   const carregarUsuariosSistema = async () => {
     setCarregandoUsuarios(true);
@@ -4982,15 +4989,6 @@ function KitsFerramentalCard({ inst, hfc, gpon, mdu, onOpenInst, onOpenHfc, onOp
   );
 }
 
-function SummaryBox({ titulo, valor }) {
-  return (
-    <div style={styles.summaryBox}>
-      <div style={styles.cardTitle}>{titulo}</div>
-      <div style={styles.summaryValue}>{valor}</div>
-    </div>
-  );
-}
-
 function PermissionBadge({ ativo, label }) {
   return (
     <span
@@ -5393,8 +5391,6 @@ const styles = {
   minimoLinha: { fontSize: 12, color: "#334155" },
   warningBox: { background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", borderRadius: 12, padding: 12, marginBottom: 16 },
   summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 },
-  summaryBox: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16 },
-  summaryValue: { fontSize: 20, fontWeight: 700, marginTop: 8, color: "#0f172a" },
   checkboxGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 },
   checkboxLabel: { display: "flex", gap: 8, alignItems: "center", fontSize: 14 },
   permissionGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 },
