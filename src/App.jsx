@@ -251,6 +251,7 @@ function getDefaultPermissions(cargo) {
     visualizarValores: ["Admin", "Gerente", "Coordenador", "SUP. Almoxarifado"].includes(cargo),
     cadastroItens: ["Admin", "Gerente", "SUP. Almoxarifado"].includes(cargo),
     cadastroTecnicos: ["Admin", "Gerente", "SUP. Almoxarifado", "Coordenador", "Ass.Logistica"].includes(cargo),
+    ajusteEstoqueTecnico: false,
   };
 }
 
@@ -428,6 +429,10 @@ function canViewDashboardValues(usuario) {
   return userHasPermission(usuario, "visualizarValores");
 }
 
+function roleCanAdjustTecnicoStock(usuario) {
+  return userHasPermission(usuario, "ajusteEstoqueTecnico");
+}
+
 function parseCCsValue(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -592,7 +597,14 @@ export default function App() {
   }, []);
 
   const [estoqueFiltro, setEstoqueFiltro] = useState({ cc: "", tecnico_id: "", item_id: "", busca_nome: "" });
+  const [estoqueBuscaTecnico, setEstoqueBuscaTecnico] = useState("");
   const [mostrarItensZerados, setMostrarItensZerados] = useState(false);
+  const [estoqueAjusteEdicao, setEstoqueAjusteEdicao] = useState(null);
+  const [estoqueAjusteForm, setEstoqueAjusteForm] = useState({
+    novaQuantidade: "",
+    tipo: "devolucao_tecnico",
+    observacao: "",
+  });
 
   useEffect(() => {
     const onResize = () => {
@@ -2558,6 +2570,26 @@ export default function App() {
       .slice(0, 80);
   }, [opcoesTecnicoMovimentacao, movBuscaTecnico]);
 
+  const opcoesTecnicoEstoque = useMemo(
+    () =>
+      tecnicosVisiveis
+        .filter((tec) => !estoqueFiltro.cc || tec.cc === estoqueFiltro.cc)
+        .sort((a, b) => String(a?.nome || "").localeCompare(String(b?.nome || ""), "pt-BR"))
+        .map((tec) => ({
+          id: String(tec.id),
+          label: `${tec.nome} (${tec.cc})`,
+        })),
+    [tecnicosVisiveis, estoqueFiltro.cc]
+  );
+
+  const opcoesTecnicoEstoqueFiltradas = useMemo(() => {
+    const termo = String(estoqueBuscaTecnico || "").trim().toLowerCase();
+    if (!termo) return opcoesTecnicoEstoque.slice(0, 80);
+    return opcoesTecnicoEstoque
+      .filter((opt) => opt.label.toLowerCase().includes(termo))
+      .slice(0, 80);
+  }, [opcoesTecnicoEstoque, estoqueBuscaTecnico]);
+
   const historicoMovimentacoesFiltrado = useMemo(() => {
     const base = movimentacoes
       .filter((mov) => roleCanViewCC(usuarioAtual, mov.cc))
@@ -2775,6 +2807,120 @@ export default function App() {
       .filter((registro) => mostrarItensZerados || Number(registro.total || 0) > 0)
       .sort((a, b) => a.itemNome.localeCompare(b.itemNome, "pt-BR"));
   }, [estoqueGeral, estoquePorTecnico, estoqueFiltro, usuarioAtual, itens, mostrarItensZerados]);
+
+  useEffect(() => {
+    if (!estoqueFiltro.tecnico_id) {
+      setEstoqueAjusteEdicao(null);
+      setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
+      return;
+    }
+
+    const tecnico = tecnicosById[Number(estoqueFiltro.tecnico_id)];
+    if (!tecnico) {
+      setEstoqueAjusteEdicao(null);
+      setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
+      return;
+    }
+    setEstoqueBuscaTecnico(`${tecnico.nome} (${tecnico.cc})`);
+  }, [estoqueFiltro.tecnico_id, tecnicosById]);
+
+  const abrirAjusteEstoqueTecnico = (registro) => {
+    if (!roleCanAdjustTecnicoStock(usuarioAtual)) {
+      notify("Seu usuário não possui permissão para ajustar itens com técnicos.", "error");
+      return;
+    }
+    if (!estoqueFiltro.tecnico_id) {
+      notify("Selecione um técnico no filtro para ajustar a quantidade.", "error");
+      return;
+    }
+    const tecnico = tecnicosById[Number(estoqueFiltro.tecnico_id)];
+    if (!tecnico) {
+      notify("Técnico selecionado inválido.", "error");
+      return;
+    }
+
+    const quantidadeAtual = Number(registro.comTecnico || 0);
+    setEstoqueAjusteEdicao({
+      itemId: Number(registro.itemId),
+      itemNome: registro.itemNome || `Item #${registro.itemId}`,
+      tecnicoId: Number(tecnico.id),
+      tecnicoNome: tecnico.nome || `Técnico #${tecnico.id}`,
+      cc: tecnico.cc,
+      quantidadeAtual,
+    });
+    setEstoqueAjusteForm({
+      novaQuantidade: String(quantidadeAtual),
+      tipo: "devolucao_tecnico",
+      observacao: "",
+    });
+  };
+
+  const salvarAjusteEstoqueTecnico = async () => {
+    if (!roleCanAdjustTecnicoStock(usuarioAtual)) {
+      notify("Seu usuário não possui permissão para ajustar itens com técnicos.", "error");
+      return;
+    }
+    if (!estoqueAjusteEdicao) {
+      notify("Selecione um item para ajustar.", "error");
+      return;
+    }
+    if (!roleCanManageCC(usuarioAtual, estoqueAjusteEdicao.cc)) {
+      notify("Seu perfil não pode movimentar esse CC.", "error");
+      return;
+    }
+
+    const novaQuantidade = Number(estoqueAjusteForm.novaQuantidade);
+    if (!Number.isFinite(novaQuantidade) || novaQuantidade < 0) {
+      notify("Informe uma nova quantidade válida (zero ou maior).", "error");
+      return;
+    }
+    if (novaQuantidade > Number(estoqueAjusteEdicao.quantidadeAtual || 0)) {
+      notify("Aumento de quantidade está bloqueado. Este ajuste permite apenas redução por correção.", "error");
+      return;
+    }
+
+    const observacao = String(estoqueAjusteForm.observacao || "").trim();
+    if (!observacao) {
+      notify("A observação é obrigatória para registrar o motivo da alteração.", "error");
+      return;
+    }
+
+    const diferenca = Number(estoqueAjusteEdicao.quantidadeAtual || 0) - novaQuantidade;
+    if (diferenca <= 0) {
+      notify("Nenhuma alteração para salvar.", "error");
+      return;
+    }
+
+    const linha = {
+      tipo: estoqueAjusteForm.tipo,
+      item_id: estoqueAjusteEdicao.itemId,
+      tecnico_id: estoqueAjusteEdicao.tecnicoId,
+      cc: estoqueAjusteEdicao.cc,
+      quantidade: diferenca,
+    };
+    const erroValidacao = validarLinhaMovimentacao(linha);
+    if (erroValidacao) {
+      notify(erroValidacao, "error");
+      return;
+    }
+
+    const payload = [{
+      ...linha,
+      observacao: `Ajuste em Estoque (correção de lançamento): ${observacao}`,
+    }];
+    const { error } = await insertMovimentacoesComAutor(payload, usuarioAtual);
+    if (error) {
+      console.error(error);
+      captureException(error, { op: "salvarAjusteEstoqueTecnico" });
+      notify(getSupabaseErrorMessage(error, "Erro ao salvar ajuste do técnico."), "error");
+      return;
+    }
+
+    await buscarMovimentacoes();
+    setEstoqueAjusteEdicao(null);
+    setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
+    notify("Ajuste salvo com sucesso.", "success");
+  };
 
   if (!usuarioAtual) {
     return (
@@ -4251,14 +4397,38 @@ export default function App() {
               Visualize em uma única tabela os totais por item e CC. Use os filtros para refinar por centro de custo, técnico, item e nome.
             </p>
             <div style={styles.formGrid}>
-              <select style={styles.input} value={estoqueFiltro.cc} onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, cc: e.target.value, tecnico_id: "" })}>
+              <select
+                style={styles.input}
+                value={estoqueFiltro.cc}
+                onChange={(e) => {
+                  setEstoqueBuscaTecnico("");
+                  setEstoqueAjusteEdicao(null);
+                  setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
+                  setEstoqueFiltro({ ...estoqueFiltro, cc: e.target.value, tecnico_id: "" });
+                }}
+              >
                 <option value="">Filtrar por CC</option>
                 {CCS.filter((cc) => roleCanViewCC(usuarioAtual, cc)).map((cc) => <option key={cc} value={cc}>{cc}</option>)}
               </select>
-              <select style={styles.input} value={estoqueFiltro.tecnico_id} onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, tecnico_id: e.target.value })}>
-                <option value="">Filtrar por técnico</option>
-                {tecnicosVisiveis.filter((tec) => !estoqueFiltro.cc || tec.cc === estoqueFiltro.cc).map((tec) => <option key={tec.id} value={tec.id}>{tec.nome}</option>)}
-              </select>
+              <input
+                style={styles.input}
+                list="estoque-tecnicos-list"
+                placeholder="Filtrar por técnico (digite para pesquisar)"
+                value={estoqueBuscaTecnico}
+                onChange={(e) => {
+                  const valor = e.target.value;
+                  setEstoqueBuscaTecnico(valor);
+                  const opcao = opcoesTecnicoEstoque.find((opt) => opt.label === valor);
+                  setEstoqueAjusteEdicao(null);
+                  setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
+                  setEstoqueFiltro((prev) => ({ ...prev, tecnico_id: opcao ? opcao.id : "" }));
+                }}
+              />
+              <datalist id="estoque-tecnicos-list">
+                {opcoesTecnicoEstoqueFiltradas.map((opt) => (
+                  <option key={opt.id} value={opt.label} />
+                ))}
+              </datalist>
               <select style={styles.input} value={estoqueFiltro.item_id} onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, item_id: e.target.value })}>
                 <option value="">Filtrar por item</option>
                 {itens.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
@@ -4270,6 +4440,54 @@ export default function App() {
                 onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, busca_nome: e.target.value })}
               />
             </div>
+            {estoqueAjusteEdicao && (
+              <div style={{ ...styles.sectionMini, marginTop: 14 }}>
+                <h4 style={styles.sectionMiniTitle}>Ajustar quantidade com técnico</h4>
+                <p style={styles.mutedText}>
+                  Item: <strong>{estoqueAjusteEdicao.itemNome}</strong> • Técnico: <strong>{estoqueAjusteEdicao.tecnicoNome}</strong> • Atual: <strong>{estoqueAjusteEdicao.quantidadeAtual}</strong>
+                </p>
+                <div style={styles.formGrid}>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    min="0"
+                    placeholder="Nova quantidade com técnico"
+                    value={estoqueAjusteForm.novaQuantidade}
+                    onChange={(e) => setEstoqueAjusteForm((prev) => ({ ...prev, novaQuantidade: e.target.value }))}
+                  />
+                  <select
+                    style={styles.input}
+                    value={estoqueAjusteForm.tipo}
+                    onChange={(e) => setEstoqueAjusteForm((prev) => ({ ...prev, tipo: e.target.value }))}
+                  >
+                    <option value="devolucao_tecnico">{LABEL_TIPO.devolucao_tecnico}</option>
+                    <option value="substituicao_perda">{LABEL_TIPO.substituicao_perda}</option>
+                    <option value="substituicao_quebra">{LABEL_TIPO.substituicao_quebra}</option>
+                    <option value="substituicao_desgaste">{LABEL_TIPO.substituicao_desgaste}</option>
+                  </select>
+                  <input
+                    style={styles.input}
+                    placeholder="Observação obrigatória (motivo da correção)"
+                    value={estoqueAjusteForm.observacao}
+                    onChange={(e) => setEstoqueAjusteForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                  />
+                </div>
+                <div style={styles.actionRow}>
+                  <button style={styles.primaryButtonInline} onClick={salvarAjusteEstoqueTecnico}>
+                    Salvar ajuste
+                  </button>
+                  <button
+                    style={styles.secondaryButtonInline}
+                    onClick={() => {
+                      setEstoqueAjusteEdicao(null);
+                      setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
             <div style={styles.tableWrap}>
               <table style={styles.table}>
                 <thead>
@@ -4289,7 +4507,25 @@ export default function App() {
                       <tr key={`${registro.itemId}-${index}`}>
                         <td style={styles.td}>{registro.itemNome}</td>
                         <td style={styles.td}>{registro.estoque}</td>
-                        <td style={styles.td}>{registro.comTecnico}</td>
+                        <td style={styles.td}>
+                          {estoqueFiltro.tecnico_id ? (
+                            <button
+                              type="button"
+                              style={styles.linkButton}
+                              disabled={!roleCanAdjustTecnicoStock(usuarioAtual)}
+                              onClick={() => abrirAjusteEstoqueTecnico(registro)}
+                              title={
+                                roleCanAdjustTecnicoStock(usuarioAtual)
+                                  ? "Editar quantidade com técnico"
+                                  : "Sem permissão para ajustar quantidade com técnico"
+                              }
+                            >
+                              {registro.comTecnico}
+                            </button>
+                          ) : (
+                            registro.comTecnico
+                          )}
+                        </td>
                         <td style={styles.td}>{registro.total}</td>
                         <td style={styles.td}>{registro.minimo}</td>
                       </tr>
@@ -4367,6 +4603,13 @@ export default function App() {
                       <div>
                         <strong>Cadastro de técnicos</strong>
                         <div style={styles.permissionHint}>Cadastrar, importar e excluir técnicos.</div>
+                      </div>
+                    </label>
+                    <label style={styles.permissionCard}>
+                      <input type="checkbox" checked={usuarioForm.permissions?.ajusteEstoqueTecnico === true} onChange={(e) => setUsuarioForm((prev) => ({ ...prev, permissions: { ...prev.permissions, ajusteEstoqueTecnico: e.target.checked } }))} />
+                      <div>
+                        <strong>Ajustar estoque com técnico</strong>
+                        <div style={styles.permissionHint}>Permite corrigir lançamentos de técnico pela tela de estoque.</div>
                       </div>
                     </label>
                   </div>
@@ -4467,6 +4710,7 @@ export default function App() {
                       <PermissionBadge ativo={user.permissions?.visualizarValores} label="Visualizar valores" />
                       <PermissionBadge ativo={user.permissions?.cadastroItens} label="Cadastro de itens" />
                       <PermissionBadge ativo={user.permissions?.cadastroTecnicos} label="Cadastro de técnicos" />
+                      <PermissionBadge ativo={user.permissions?.ajusteEstoqueTecnico} label="Ajustar estoque com técnico" />
                     </div>
 
                     {expandido && roleCanManageUsers(usuarioAtual) && (
@@ -4529,6 +4773,13 @@ export default function App() {
                             <div>
                               <strong>Cadastro de técnicos</strong>
                               <div style={styles.permissionHint}>Cadastro, importação e exclusão.</div>
+                            </div>
+                          </label>
+                          <label style={styles.permissionCard}>
+                            <input type="checkbox" checked={user.permissions?.ajusteEstoqueTecnico === true} onChange={(e) => atualizarUsuarioPermissao(user.id, "ajusteEstoqueTecnico", e.target.checked)} />
+                            <div>
+                              <strong>Ajustar estoque com técnico</strong>
+                              <div style={styles.permissionHint}>Corrigir lançamentos de técnico na tela de estoque.</div>
                             </div>
                           </label>
                         </div>
@@ -4980,6 +5231,16 @@ const styles = {
     color: "#ffffff",
     cursor: "pointer",
     fontWeight: 700,
+  },
+  linkButton: {
+    border: 0,
+    background: "transparent",
+    color: "#1d4ed8",
+    cursor: "pointer",
+    fontWeight: 700,
+    textDecoration: "underline",
+    padding: 0,
+    fontSize: 14,
   },
   fileButton: {
     padding: "12px 18px",
