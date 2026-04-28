@@ -2018,10 +2018,16 @@ export default function App() {
       return;
     }
 
+    const tecnicoSelecionado = tecnicosById[Number(movForm.tecnico_id)];
     setLoteMovimentacoes((prev) => [...prev, { ...movForm, localId: uid() }]);
-    setMovForm((prev) => ({ ...emptyMovForm(), cc: prev.cc }));
+    setMovForm((prev) => ({
+      ...emptyMovForm(),
+      tipo: prev.tipo,
+      cc: prev.cc,
+      tecnico_id: prev.tecnico_id,
+    }));
     setMovBuscaItem("");
-    setMovBuscaTecnico("");
+    setMovBuscaTecnico(tecnicoSelecionado ? `${tecnicoSelecionado.nome} (${tecnicoSelecionado.cc})` : "");
   };
 
   const removerDoLote = (localId) => {
