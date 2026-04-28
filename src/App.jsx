@@ -39,7 +39,7 @@ const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.2.0";
 
 const TIPOS_MOV = [
   { value: "entrada", label: "Entrada em estoque" },
@@ -2080,7 +2080,7 @@ export default function App() {
       tecnico_id: prev.tecnico_id,
     }));
     setMovBuscaItem("");
-    setMovBuscaTecnico("");
+    setMovBuscaTecnico(labelTecnicoSelecionadoMov);
   };
 
   const removerDoLote = (localId) => {
@@ -2684,6 +2684,12 @@ export default function App() {
       .slice(0, 80);
   }, [opcoesItemMovimentacao, movBuscaItem]);
 
+  const labelItemSelecionadoMov = useMemo(() => {
+    if (!movForm.item_id) return "";
+    const opcao = opcoesItemMovimentacao.find((opt) => String(opt.id) === String(movForm.item_id));
+    return opcao?.label || "";
+  }, [movForm.item_id, opcoesItemMovimentacao]);
+
   const usuariosVisiveis = useMemo(
     () =>
       usuariosSistema
@@ -2736,6 +2742,12 @@ export default function App() {
       .filter((opt) => opt.label.toLowerCase().includes(termo))
       .slice(0, 80);
   }, [opcoesTecnicoMovimentacao, movBuscaTecnico]);
+
+  const labelTecnicoSelecionadoMov = useMemo(() => {
+    if (!movForm.tecnico_id) return "";
+    const opcao = opcoesTecnicoMovimentacao.find((opt) => String(opt.id) === String(movForm.tecnico_id));
+    return opcao?.label || "";
+  }, [movForm.tecnico_id, opcoesTecnicoMovimentacao]);
 
   const opcoesTecnicoEstoque = useMemo(
     () =>
@@ -4138,6 +4150,12 @@ export default function App() {
                     list="movimentacao-itens-list"
                     placeholder="Selecione o item (digite para pesquisar)"
                     value={movBuscaItem}
+                    onFocus={() => {
+                      if (movForm.item_id && movBuscaItem === labelItemSelecionadoMov) {
+                        setMovBuscaItem("");
+                        setMovForm((prev) => ({ ...prev, item_id: "" }));
+                      }
+                    }}
                     onChange={(e) => {
                       const valor = e.target.value;
                       setMovBuscaItem(valor);
@@ -4158,6 +4176,12 @@ export default function App() {
                       list="movimentacao-tecnicos-list"
                       placeholder="Selecione o técnico (digite para pesquisar)"
                       value={movBuscaTecnico}
+                      onFocus={() => {
+                        if (movForm.tecnico_id && movBuscaTecnico === labelTecnicoSelecionadoMov) {
+                          setMovBuscaTecnico("");
+                          setMovForm((prev) => ({ ...prev, tecnico_id: "" }));
+                        }
+                      }}
                       onChange={(e) => {
                         const valor = e.target.value;
                         setMovBuscaTecnico(valor);
