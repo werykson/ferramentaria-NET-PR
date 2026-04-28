@@ -948,10 +948,13 @@ export default function App() {
   const saldoEstoqueCCItem = useMemo(() => {
     const mapa = {};
     movimentacoes.forEach((mov) => {
-      const cc = mov.cc || "SEM_CC";
+      const cc = resolveCCAlias(mov.cc);
+      if (!cc) return;
       const itemId = Number(mov.item_id);
+      if (!Number.isFinite(itemId) || itemId <= 0) return;
       const chave = `${cc}-${itemId}`;
       const quantidade = Number(mov.quantidade || 0);
+      if (!Number.isFinite(quantidade) || quantidade <= 0) return;
       if (!mapa[chave]) mapa[chave] = 0;
 
       if (["entrada", "devolucao_tecnico", "ajuste_positivo", "triangulacao_entrada"].includes(mov.tipo)) {
@@ -978,8 +981,11 @@ export default function App() {
       if (!mov.tecnico_id) return;
       const tecnicoId = Number(mov.tecnico_id);
       const itemId = Number(mov.item_id);
+      if (!Number.isFinite(tecnicoId) || tecnicoId <= 0) return;
+      if (!Number.isFinite(itemId) || itemId <= 0) return;
       const chave = `${tecnicoId}-${itemId}`;
       const quantidade = Number(mov.quantidade || 0);
+      if (!Number.isFinite(quantidade) || quantidade <= 0) return;
       if (!mapa[chave]) mapa[chave] = 0;
 
       if (mov.tipo === "saida_tecnico") mapa[chave] += quantidade;
@@ -1985,6 +1991,7 @@ export default function App() {
     }
 
     const itemId = Number(linha.item_id);
+    const item = itensById[itemId];
     const tecnicoId = linha.tecnico_id ? Number(linha.tecnico_id) : null;
     const chaveEstoque = `${linha.cc}-${itemId}`;
     const chaveTecnico = tecnicoId ? `${tecnicoId}-${itemId}` : null;
@@ -1996,6 +2003,17 @@ export default function App() {
     }
 
     if (["substituicao_perda", "substituicao_quebra", "substituicao_desgaste"].includes(linha.tipo)) {
+      const kitRef = Math.max(
+        Number(item?.qtdKitInst ?? item?.qtd_kit_inst ?? 0),
+        Number(item?.qtdKitMdu ?? item?.qtd_kit_mdu ?? 0),
+        Number(item?.qtd_kit ?? 0)
+      );
+      if (!Number.isFinite(kitRef) || kitRef <= 0) {
+        return "Este item não possui referência de KIT cadastrada para permitir substituição.";
+      }
+      if (quantidade > kitRef) {
+        return `Quantidade acima do limite de KIT para substituição. Limite do item: ${kitRef}.`;
+      }
       if (quantidade > saldoAtualEstoque) {
         return `Saldo insuficiente no estoque para substituição. Saldo atual: ${saldoAtualEstoque}.`;
       }
@@ -2040,6 +2058,7 @@ export default function App() {
   const validarSaldoLoteMovimentacoes = (linhas) => {
     const deltaEstoquePorChave = {};
     const deltaTecnicoPorChave = {};
+    const somaSubstituicaoPorTecnicoItem = {};
 
     linhas.forEach((linha) => {
       const qtd = Number(linha.quantidade || 0);
@@ -2060,8 +2079,12 @@ export default function App() {
       if (chaveTecnico) {
         if (!deltaTecnicoPorChave[chaveTecnico]) deltaTecnicoPorChave[chaveTecnico] = 0;
         if (linha.tipo === "saida_tecnico") deltaTecnicoPorChave[chaveTecnico] += qtd;
-        if (["devolucao_tecnico", "substituicao_perda", "substituicao_quebra", "substituicao_desgaste"].includes(linha.tipo)) {
+        if (linha.tipo === "devolucao_tecnico") {
           deltaTecnicoPorChave[chaveTecnico] -= qtd;
+        }
+        if (["substituicao_perda", "substituicao_quebra", "substituicao_desgaste"].includes(linha.tipo)) {
+          if (!somaSubstituicaoPorTecnicoItem[chaveTecnico]) somaSubstituicaoPorTecnicoItem[chaveTecnico] = 0;
+          somaSubstituicaoPorTecnicoItem[chaveTecnico] += qtd;
         }
       }
     });
@@ -2093,6 +2116,35 @@ export default function App() {
       const saldoAtual = Number(saldoTecnicoItem[chave] || 0);
       const saldoFinal = saldoAtual + Number(delta || 0);
       return `Operação inválida: ${tecnico?.nome || `Técnico #${tecnicoId}`} ficaria com saldo negativo do item ${item?.nome || `#${itemId}`} (${saldoFinal}). Saldo atual com técnico: ${saldoAtual}.`;
+    }
+
+    const conflitoKitSubstituicao = Object.entries(somaSubstituicaoPorTecnicoItem).find(([chave, qtdSomada]) => {
+      const splitIndex = chave.indexOf("-");
+      const itemId = Number(chave.slice(splitIndex + 1));
+      const item = itensById[itemId];
+      const kitRef = Math.max(
+        Number(item?.qtdKitInst ?? item?.qtd_kit_inst ?? 0),
+        Number(item?.qtdKitMdu ?? item?.qtd_kit_mdu ?? 0),
+        Number(item?.qtd_kit ?? 0)
+      );
+      return !Number.isFinite(kitRef) || kitRef <= 0 || Number(qtdSomada) > kitRef;
+    });
+    if (conflitoKitSubstituicao) {
+      const [chave, qtdSomada] = conflitoKitSubstituicao;
+      const splitIndex = chave.indexOf("-");
+      const tecnicoId = Number(chave.slice(0, splitIndex));
+      const itemId = Number(chave.slice(splitIndex + 1));
+      const tecnico = tecnicosById[tecnicoId];
+      const item = itensById[itemId];
+      const kitRef = Math.max(
+        Number(item?.qtdKitInst ?? item?.qtd_kit_inst ?? 0),
+        Number(item?.qtdKitMdu ?? item?.qtd_kit_mdu ?? 0),
+        Number(item?.qtd_kit ?? 0)
+      );
+      if (!Number.isFinite(kitRef) || kitRef <= 0) {
+        return `Operação inválida: o item ${item?.nome || `#${itemId}`} não possui referência de KIT para substituição.`;
+      }
+      return `Operação inválida: substituição do item ${item?.nome || `#${itemId}`} para ${tecnico?.nome || `Técnico #${tecnicoId}`} excede o limite de KIT (${qtdSomada} > ${kitRef}).`;
     }
 
     return null;
