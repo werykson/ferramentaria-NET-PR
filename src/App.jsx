@@ -39,7 +39,7 @@ const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.1.4";
 
 const TIPOS_MOV = [
   { value: "entrada", label: "Entrada em estoque" },
