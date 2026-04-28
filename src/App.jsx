@@ -3081,7 +3081,10 @@ export default function App() {
           {MENU.filter((item) => item.key !== "usuarios" || roleCanManageUsers(usuarioAtual)).map((item) => (
             <button
               key={item.key}
-              onClick={() => setPagina(item.key)}
+              onClick={() => {
+                setPagina(item.key);
+                if (item.key === "dashboard") setDashboardModo("resumo");
+              }}
               style={{ ...styles.menuButton, ...(pagina === item.key ? styles.menuButtonActive : {}) }}
             >
               <span style={styles.menuButtonContent}>
