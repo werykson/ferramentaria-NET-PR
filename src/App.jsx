@@ -1867,18 +1867,32 @@ export default function App() {
 
       const { data: tecnicosExistentes, error: existentesError } = await supabase
         .from("tecnicos")
-        .select("nome");
+        .select("id,nome,cc");
       if (existentesError) throw existentesError;
 
-      const nomesExistentes = new Set((tecnicosExistentes || []).map((tec) => normalizeSearchText(tec.nome)));
+      const tecnicoExistentePorNome = new Map(
+        (tecnicosExistentes || []).map((tec) => [normalizeSearchText(tec.nome), tec])
+      );
       const paraInserir = [];
-      let ignoradosNomeExistente = 0;
+      const paraAtualizar = [];
+      let semAlteracao = 0;
       payloadUnico.forEach((row) => {
-        if (nomesExistentes.has(normalizeSearchText(row.nome))) {
-          ignoradosNomeExistente += 1;
+        const chaveNome = normalizeSearchText(row.nome);
+        const existente = tecnicoExistentePorNome.get(chaveNome);
+        if (!existente) {
+          paraInserir.push(row);
           return;
         }
-        paraInserir.push(row);
+
+        const ccAtual = resolveCCAlias(existente.cc);
+        if (ccAtual !== row.cc) {
+          paraAtualizar.push({
+            id: existente.id,
+            cc: row.cc,
+          });
+          return;
+        }
+        semAlteracao += 1;
       });
 
       if (paraInserir.length) {
@@ -1886,11 +1900,25 @@ export default function App() {
         if (insErr) throw insErr;
       }
 
+      if (paraAtualizar.length) {
+        const resultados = await Promise.allSettled(
+          paraAtualizar.map((row) =>
+            supabase.from("tecnicos").update({ cc: row.cc }).eq("id", row.id)
+          )
+        );
+        const erroAtualizacao = resultados.find(
+          (res) => res.status === "rejected" || res.value?.error
+        );
+        if (erroAtualizacao) {
+          throw erroAtualizacao.status === "rejected" ? erroAtualizacao.reason : erroAtualizacao.value.error;
+        }
+      }
+
       await buscarTecnicos();
       alert(
-        `Importação concluída: ${paraInserir.length} novo(s), ${
+        `Importação concluída: ${paraInserir.length} novo(s), ${paraAtualizar.length} realocado(s) de CC, ${semAlteracao} sem alteração, ${
           payload.length - payloadUnico.length
-        } nome(s) duplicado(s) na planilha ignorado(s), ${ignoradosNomeExistente} nome(s) já existente(s) no banco ignorado(s) e ${ignoradosCCInvalido} CC(s) inválido(s) ignorado(s).`
+        } nome(s) duplicado(s) na planilha ignorado(s) e ${ignoradosCCInvalido} CC(s) inválido(s) ignorado(s).`
       );
     } catch (error) {
       console.error(error);
