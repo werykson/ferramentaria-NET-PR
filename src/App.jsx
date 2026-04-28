@@ -2018,7 +2018,6 @@ export default function App() {
       return;
     }
 
-    const tecnicoSelecionado = tecnicosById[Number(movForm.tecnico_id)];
     setLoteMovimentacoes((prev) => [...prev, { ...movForm, localId: uid() }]);
     setMovForm((prev) => ({
       ...emptyMovForm(),
@@ -2027,7 +2026,7 @@ export default function App() {
       tecnico_id: prev.tecnico_id,
     }));
     setMovBuscaItem("");
-    setMovBuscaTecnico(tecnicoSelecionado ? `${tecnicoSelecionado.nome} (${tecnicoSelecionado.cc})` : "");
+    setMovBuscaTecnico("");
   };
 
   const removerDoLote = (localId) => {
@@ -2036,6 +2035,67 @@ export default function App() {
 
   const limparLoteMovimentacoes = () => {
     setLoteMovimentacoes([]);
+  };
+
+  const validarSaldoLoteMovimentacoes = (linhas) => {
+    const deltaEstoquePorChave = {};
+    const deltaTecnicoPorChave = {};
+
+    linhas.forEach((linha) => {
+      const qtd = Number(linha.quantidade || 0);
+      const itemId = Number(linha.item_id);
+      const tecnicoId = linha.tecnico_id ? Number(linha.tecnico_id) : null;
+      const chaveEstoque = `${linha.cc}-${itemId}`;
+      const chaveTecnico = tecnicoId ? `${tecnicoId}-${itemId}` : null;
+
+      if (!deltaEstoquePorChave[chaveEstoque]) deltaEstoquePorChave[chaveEstoque] = 0;
+
+      if (["entrada", "devolucao_tecnico", "ajuste_positivo"].includes(linha.tipo)) {
+        deltaEstoquePorChave[chaveEstoque] += qtd;
+      }
+      if (["saida_tecnico", "ajuste_negativo", "substituicao_perda", "substituicao_quebra", "substituicao_desgaste"].includes(linha.tipo)) {
+        deltaEstoquePorChave[chaveEstoque] -= qtd;
+      }
+
+      if (chaveTecnico) {
+        if (!deltaTecnicoPorChave[chaveTecnico]) deltaTecnicoPorChave[chaveTecnico] = 0;
+        if (linha.tipo === "saida_tecnico") deltaTecnicoPorChave[chaveTecnico] += qtd;
+        if (["devolucao_tecnico", "substituicao_perda", "substituicao_quebra", "substituicao_desgaste"].includes(linha.tipo)) {
+          deltaTecnicoPorChave[chaveTecnico] -= qtd;
+        }
+      }
+    });
+
+    const conflitoEstoque = Object.entries(deltaEstoquePorChave).find(([chave, delta]) => {
+      const saldoAtual = Number(saldoEstoqueCCItem[chave] || 0);
+      return saldoAtual + Number(delta || 0) < 0;
+    });
+    if (conflitoEstoque) {
+      const [chave, delta] = conflitoEstoque;
+      const [cc, itemId] = chave.split("-");
+      const item = itensById[Number(itemId)];
+      const saldoAtual = Number(saldoEstoqueCCItem[chave] || 0);
+      const saldoFinal = saldoAtual + Number(delta || 0);
+      return `Operação inválida: o item ${item?.nome || `#${itemId}`} em ${cc} ficaria negativo (${saldoFinal}). Saldo atual: ${saldoAtual}.`;
+    }
+
+    const conflitoTecnico = Object.entries(deltaTecnicoPorChave).find(([chave, delta]) => {
+      const saldoAtual = Number(saldoTecnicoItem[chave] || 0);
+      return saldoAtual + Number(delta || 0) < 0;
+    });
+    if (conflitoTecnico) {
+      const [chave, delta] = conflitoTecnico;
+      const splitIndex = chave.indexOf("-");
+      const tecnicoId = Number(chave.slice(0, splitIndex));
+      const itemId = Number(chave.slice(splitIndex + 1));
+      const tecnico = tecnicosById[tecnicoId];
+      const item = itensById[itemId];
+      const saldoAtual = Number(saldoTecnicoItem[chave] || 0);
+      const saldoFinal = saldoAtual + Number(delta || 0);
+      return `Operação inválida: ${tecnico?.nome || `Técnico #${tecnicoId}`} ficaria com saldo negativo do item ${item?.nome || `#${itemId}`} (${saldoFinal}). Saldo atual com técnico: ${saldoAtual}.`;
+    }
+
+    return null;
   };
 
   const validarLinhaTriangulacao = (linha) => {
@@ -2100,6 +2160,12 @@ export default function App() {
         `Atenção: esta movimentação possui itens que exigem gerar desconto/cobrança:\n\n${itensTexto}\n\nDeseja continuar?`
       );
       if (!confirmou) return;
+    }
+
+    const erroSaldoLote = validarSaldoLoteMovimentacoes(loteMovimentacoes);
+    if (erroSaldoLote) {
+      notify(erroSaldoLote, "error");
+      return;
     }
 
     const payload = loteMovimentacoes.map((linha) => ({
