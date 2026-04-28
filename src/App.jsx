@@ -972,6 +972,10 @@ export default function App() {
         mapa[chave] -= quantidade;
       }
     });
+    // Regra operacional: saldo de estoque nunca pode ficar negativo.
+    Object.keys(mapa).forEach((chave) => {
+      mapa[chave] = Math.max(0, Number(mapa[chave] || 0));
+    });
     return mapa;
   }, [movimentacoes]);
 
@@ -1997,6 +2001,10 @@ export default function App() {
     const chaveTecnico = tecnicoId ? `${tecnicoId}-${itemId}` : null;
     const saldoAtualEstoque = Number(saldoEstoqueCCItem[chaveEstoque] || 0);
     const saldoAtualTecnico = chaveTecnico ? Number(saldoTecnicoItem[chaveTecnico] || 0) : 0;
+
+    if (["saida_tecnico", "ajuste_negativo", "substituicao_perda", "substituicao_quebra", "substituicao_desgaste"].includes(linha.tipo) && saldoAtualEstoque <= 0) {
+      return "Estoque zerado para este item no CC selecionado. Não é permitido lançar saída com estoque 0.";
+    }
 
     if (["saida_tecnico", "ajuste_negativo"].includes(linha.tipo) && quantidade > saldoAtualEstoque) {
       return `Saldo insuficiente no estoque. Saldo atual: ${saldoAtualEstoque}.`;
@@ -3659,10 +3667,12 @@ export default function App() {
               <div style={styles.actionRow}>
                 <button style={styles.secondaryButtonInline} onClick={baixarModeloItensExcel}>Baixar modelo</button>
                 <button style={styles.secondaryButtonInline} onClick={exportarItensExcel}>Exportar Excel</button>
-                <label style={styles.fileButton}>
-                  Importar Excel
-                  <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={importarItensExcel} />
-                </label>
+                {roleCanManageUsers(usuarioAtual) && (
+                  <label style={styles.fileButton}>
+                    Importar Excel
+                    <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={importarItensExcel} />
+                  </label>
+                )}
               </div>
             </div>
 
@@ -3918,10 +3928,12 @@ export default function App() {
               <div style={styles.actionRow}>
                 <button style={styles.secondaryButtonInline} onClick={baixarModeloTecnicosExcel}>Baixar modelo</button>
                 <button style={styles.secondaryButtonInline} onClick={exportarTecnicosExcel}>Exportar Excel</button>
-                <label style={styles.fileButton}>
-                  Importar Excel
-                  <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={importarTecnicosExcel} />
-                </label>
+                {roleCanManageUsers(usuarioAtual) && (
+                  <label style={styles.fileButton}>
+                    Importar Excel
+                    <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={importarTecnicosExcel} />
+                  </label>
+                )}
               </div>
             </div>
 
