@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "./supabaseClient";
 import { theme } from "./theme.js";
@@ -39,7 +39,7 @@ const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const TRANSFERENCIA_TECNICO_TAG = "[TRANSFERENCIA_TECNICO]";
 
 const TIPOS_MOV = [
@@ -4962,44 +4962,6 @@ export default function App() {
                 ? "Visualize em uma única tabela os totais por item e CC. Nesta visão o filtro principal é por centro de custo."
                 : "Nesta visão você consulta os itens em posse dos técnicos e pode remover linhas para devolver o saldo ao estoque do CC."}
             </p>
-            {roleIsAdmin(usuarioAtual) && estoqueAjusteAdmin && (
-              <div style={{ ...styles.sectionMini, marginBottom: 12 }}>
-                <h4 style={styles.sectionMiniTitle}>Correção pontual (Admin)</h4>
-                <p style={styles.mutedText}>
-                  {estoqueAjusteAdmin.modo === "cc"
-                    ? `Item: ${estoqueAjusteAdmin.itemNome} | CC: ${estoqueAjusteAdmin.cc} | Atual: ${estoqueAjusteAdmin.quantidadeAtual}`
-                    : `Item: ${estoqueAjusteAdmin.itemNome} | Técnico: ${estoqueAjusteAdmin.tecnicoNome} | CC: ${estoqueAjusteAdmin.cc} | Atual: ${estoqueAjusteAdmin.quantidadeAtual}`}
-                </p>
-                <div style={styles.formGrid}>
-                  <input
-                    style={styles.input}
-                    type="number"
-                    min="0"
-                    placeholder="Nova quantidade"
-                    value={estoqueAjusteAdminForm.novaQuantidade}
-                    onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, novaQuantidade: e.target.value }))}
-                  />
-                  <input
-                    style={styles.input}
-                    placeholder="Observação obrigatória"
-                    value={estoqueAjusteAdminForm.observacao}
-                    onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, observacao: e.target.value }))}
-                  />
-                </div>
-                <div style={styles.actionRow}>
-                  <button style={styles.primaryButtonInline} onClick={salvarAjusteAdminEstoque}>Salvar correção</button>
-                  <button
-                    style={styles.secondaryButtonInline}
-                    onClick={() => {
-                      setEstoqueAjusteAdmin(null);
-                      setEstoqueAjusteAdminForm({ novaQuantidade: "", observacao: "" });
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            )}
             <div style={styles.formGrid}>
               <select
                 style={styles.input}
@@ -5053,26 +5015,71 @@ export default function App() {
                       <tr><td style={styles.td} colSpan={roleIsAdmin(usuarioAtual) ? 6 : 5}>Nenhum registro encontrado para os filtros selecionados.</td></tr>
                     ) : (
                       estoqueConsolidadoFiltrado.map((registro, index) => (
-                        <tr key={`${registro.itemId}-${index}`}>
-                          <td style={styles.td}>{registro.itemNome}</td>
-                          <td style={styles.td}>{registro.estoque}</td>
-                          <td style={styles.td}>{registro.comTecnico}</td>
-                          <td style={styles.td}>{registro.total}</td>
-                          <td style={styles.td}>{registro.minimo}</td>
-                          {roleIsAdmin(usuarioAtual) && (
-                            <td style={styles.td}>
-                              <button
-                                type="button"
-                                style={styles.secondaryButtonInline}
-                                onClick={() => abrirAjusteAdminEstoqueCc(registro)}
-                                disabled={!estoqueFiltro.cc}
-                                title={!estoqueFiltro.cc ? "Selecione um CC para ajustar." : ""}
-                              >
-                                Editar saldo
-                              </button>
-                            </td>
-                          )}
-                        </tr>
+                        <Fragment key={`${registro.itemId}-${index}`}>
+                          <tr>
+                            <td style={styles.td}>{registro.itemNome}</td>
+                            <td style={styles.td}>{registro.estoque}</td>
+                            <td style={styles.td}>{registro.comTecnico}</td>
+                            <td style={styles.td}>{registro.total}</td>
+                            <td style={styles.td}>{registro.minimo}</td>
+                            {roleIsAdmin(usuarioAtual) && (
+                              <td style={styles.td}>
+                                <button
+                                  type="button"
+                                  style={styles.secondaryButtonInline}
+                                  onClick={() => abrirAjusteAdminEstoqueCc(registro)}
+                                  disabled={!estoqueFiltro.cc}
+                                  title={!estoqueFiltro.cc ? "Selecione um CC para ajustar." : ""}
+                                >
+                                  Editar saldo
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                          {roleIsAdmin(usuarioAtual) &&
+                            estoqueAjusteAdmin?.modo === "cc" &&
+                            Number(estoqueAjusteAdmin.itemId) === Number(registro.itemId) &&
+                            String(estoqueAjusteAdmin.cc || "") === String(estoqueFiltro.cc || "") && (
+                              <tr>
+                                <td style={styles.td} colSpan={6}>
+                                  <div style={{ ...styles.sectionMini, margin: 0 }}>
+                                    <h4 style={styles.sectionMiniTitle}>Correção pontual (Admin)</h4>
+                                    <p style={styles.mutedText}>
+                                      {`Item: ${estoqueAjusteAdmin.itemNome} | CC: ${estoqueAjusteAdmin.cc} | Atual: ${estoqueAjusteAdmin.quantidadeAtual}`}
+                                    </p>
+                                    <div style={styles.formGrid}>
+                                      <input
+                                        style={styles.input}
+                                        type="number"
+                                        min="0"
+                                        placeholder="Nova quantidade"
+                                        value={estoqueAjusteAdminForm.novaQuantidade}
+                                        onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, novaQuantidade: e.target.value }))}
+                                      />
+                                      <input
+                                        style={styles.input}
+                                        placeholder="Observação obrigatória"
+                                        value={estoqueAjusteAdminForm.observacao}
+                                        onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                                      />
+                                    </div>
+                                    <div style={styles.actionRow}>
+                                      <button style={styles.primaryButtonInline} onClick={salvarAjusteAdminEstoque}>Salvar correção</button>
+                                      <button
+                                        style={styles.secondaryButtonInline}
+                                        onClick={() => {
+                                          setEstoqueAjusteAdmin(null);
+                                          setEstoqueAjusteAdminForm({ novaQuantidade: "", observacao: "" });
+                                        }}
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                        </Fragment>
                       ))
                     )}
                   </tbody>
@@ -5135,32 +5142,78 @@ export default function App() {
                         <tr><td style={styles.td} colSpan={3}>Este técnico não possui itens em posse para o CC filtrado.</td></tr>
                       ) : (
                         itensDoTecnicoNoCc.map((registro) => (
-                          <tr key={`${registro.tecnico_id}-${registro.item_id}-${registro.cc}`}>
-                            <td style={styles.td}>{registro.itemNome}</td>
-                            <td style={{ ...styles.td, color: Number(registro.quantidade || 0) < 0 ? "#b91c1c" : styles.td.color }}>
-                              {registro.quantidade}
-                            </td>
-                            <td style={styles.td}>
-                              {roleIsAdmin(usuarioAtual) && (
+                          <Fragment key={`${registro.tecnico_id}-${registro.item_id}-${registro.cc}`}>
+                            <tr>
+                              <td style={styles.td}>{registro.itemNome}</td>
+                              <td style={{ ...styles.td, color: Number(registro.quantidade || 0) < 0 ? "#b91c1c" : styles.td.color }}>
+                                {registro.quantidade}
+                              </td>
+                              <td style={styles.td}>
+                                {roleIsAdmin(usuarioAtual) && (
+                                  <button
+                                    type="button"
+                                    style={styles.secondaryButtonInline}
+                                    onClick={() => abrirAjusteAdminEstoqueTecnico(registro)}
+                                  >
+                                    Editar saldo
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  style={styles.secondaryButtonInline}
-                                  onClick={() => abrirAjusteAdminEstoqueTecnico(registro)}
+                                  style={styles.deleteButton}
+                                  disabled={!roleCanAdjustTecnicoStock(usuarioAtual) || Number(registro.quantidade || 0) <= 0}
+                                  onClick={() => removerItemDoTecnico(registro)}
+                                  title={Number(registro.quantidade || 0) <= 0 ? "Ação disponível apenas para saldo positivo." : ""}
                                 >
-                                  Editar saldo
+                                  Excluir linha
                                 </button>
+                              </td>
+                            </tr>
+                            {roleIsAdmin(usuarioAtual) &&
+                              estoqueAjusteAdmin?.modo === "tecnico" &&
+                              Number(estoqueAjusteAdmin.itemId) === Number(registro.item_id) &&
+                              Number(estoqueAjusteAdmin.tecnicoId) === Number(registro.tecnico_id) &&
+                              String(estoqueAjusteAdmin.cc || "") === String(registro.cc || "") && (
+                                <tr>
+                                  <td style={styles.td} colSpan={3}>
+                                    <div style={{ ...styles.sectionMini, margin: 0 }}>
+                                      <h4 style={styles.sectionMiniTitle}>Correção pontual (Admin)</h4>
+                                      <p style={styles.mutedText}>
+                                        {`Item: ${estoqueAjusteAdmin.itemNome} | Técnico: ${estoqueAjusteAdmin.tecnicoNome} | CC: ${estoqueAjusteAdmin.cc} | Atual: ${estoqueAjusteAdmin.quantidadeAtual}`}
+                                      </p>
+                                      <div style={styles.formGrid}>
+                                        <input
+                                          style={styles.input}
+                                          type="number"
+                                          min="0"
+                                          placeholder="Nova quantidade"
+                                          value={estoqueAjusteAdminForm.novaQuantidade}
+                                          onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, novaQuantidade: e.target.value }))}
+                                        />
+                                        <input
+                                          style={styles.input}
+                                          placeholder="Observação obrigatória"
+                                          value={estoqueAjusteAdminForm.observacao}
+                                          onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                                        />
+                                      </div>
+                                      <div style={styles.actionRow}>
+                                        <button style={styles.primaryButtonInline} onClick={salvarAjusteAdminEstoque}>Salvar correção</button>
+                                        <button
+                                          style={styles.secondaryButtonInline}
+                                          onClick={() => {
+                                            setEstoqueAjusteAdmin(null);
+                                            setEstoqueAjusteAdminForm({ novaQuantidade: "", observacao: "" });
+                                          }}
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                              <button
-                                type="button"
-                                style={styles.deleteButton}
-                                disabled={!roleCanAdjustTecnicoStock(usuarioAtual) || Number(registro.quantidade || 0) <= 0}
-                                onClick={() => removerItemDoTecnico(registro)}
-                                title={Number(registro.quantidade || 0) <= 0 ? "Ação disponível apenas para saldo positivo." : ""}
-                              >
-                                Excluir linha
-                              </button>
-                            </td>
-                          </tr>
+                          </Fragment>
                         ))
                       )}
                     </tbody>
