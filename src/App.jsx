@@ -588,14 +588,8 @@ export default function App() {
   }, []);
 
   const [estoqueFiltro, setEstoqueFiltro] = useState({ cc: "", tecnico_id: "", item_id: "", busca_nome: "" });
-  const [estoqueBuscaTecnico, setEstoqueBuscaTecnico] = useState("");
+  const [estoqueAbaAtiva, setEstoqueAbaAtiva] = useState("consolidado");
   const [mostrarItensZerados, setMostrarItensZerados] = useState(false);
-  const [estoqueAjusteEdicao, setEstoqueAjusteEdicao] = useState(null);
-  const [estoqueAjusteForm, setEstoqueAjusteForm] = useState({
-    novaQuantidade: "",
-    tipo: "devolucao_tecnico",
-    observacao: "",
-  });
 
   useEffect(() => {
     const onResize = () => {
@@ -2750,26 +2744,6 @@ export default function App() {
     return opcao?.label || "";
   }, [movForm.tecnico_id, opcoesTecnicoMovimentacao]);
 
-  const opcoesTecnicoEstoque = useMemo(
-    () =>
-      tecnicosVisiveis
-        .filter((tec) => !estoqueFiltro.cc || tec.cc === estoqueFiltro.cc)
-        .sort((a, b) => String(a?.nome || "").localeCompare(String(b?.nome || ""), "pt-BR"))
-        .map((tec) => ({
-          id: String(tec.id),
-          label: `${tec.nome} (${tec.cc})`,
-        })),
-    [tecnicosVisiveis, estoqueFiltro.cc]
-  );
-
-  const opcoesTecnicoEstoqueFiltradas = useMemo(() => {
-    const termo = String(estoqueBuscaTecnico || "").trim().toLowerCase();
-    if (!termo) return opcoesTecnicoEstoque.slice(0, 80);
-    return opcoesTecnicoEstoque
-      .filter((opt) => opt.label.toLowerCase().includes(termo))
-      .slice(0, 80);
-  }, [opcoesTecnicoEstoque, estoqueBuscaTecnico]);
-
   const historicoMovimentacoesFiltrado = useMemo(() => {
     const base = movimentacoes
       .filter((mov) => roleCanViewCC(usuarioAtual, mov.cc))
@@ -2988,118 +2962,77 @@ export default function App() {
       .sort((a, b) => a.itemNome.localeCompare(b.itemNome, "pt-BR"));
   }, [estoqueGeral, estoquePorTecnico, estoqueFiltro, usuarioAtual, itens, mostrarItensZerados]);
 
-  useEffect(() => {
-    if (!estoqueFiltro.tecnico_id) {
-      setEstoqueAjusteEdicao(null);
-      setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
-      return;
-    }
+  const tecnicosComEstoqueNoCc = useMemo(() => {
+    const ccSelecionado = String(estoqueFiltro.cc || "").trim();
+    if (!ccSelecionado) return [];
+    const mapa = {};
+    estoquePorTecnico
+      .filter((registro) => registro.cc === ccSelecionado)
+      .forEach((registro) => {
+        const tecnicoId = Number(registro.tecnico_id);
+        if (!mapa[tecnicoId]) {
+          mapa[tecnicoId] = {
+            tecnico_id: tecnicoId,
+            tecnicoNome: registro.tecnicoNome || `Técnico #${tecnicoId}`,
+            cc: ccSelecionado,
+            itens: 0,
+            quantidadeTotal: 0,
+          };
+        }
+        mapa[tecnicoId].itens += 1;
+        mapa[tecnicoId].quantidadeTotal += Number(registro.quantidade || 0);
+      });
+    return Object.values(mapa).sort((a, b) => a.tecnicoNome.localeCompare(b.tecnicoNome, "pt-BR"));
+  }, [estoquePorTecnico, estoqueFiltro.cc]);
 
-    const tecnico = tecnicosById[Number(estoqueFiltro.tecnico_id)];
-    if (!tecnico) {
-      setEstoqueAjusteEdicao(null);
-      setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
-      return;
-    }
-    setEstoqueBuscaTecnico(`${tecnico.nome} (${tecnico.cc})`);
-  }, [estoqueFiltro.tecnico_id, tecnicosById]);
+  const itensDoTecnicoNoCc = useMemo(() => {
+    const ccSelecionado = String(estoqueFiltro.cc || "").trim();
+    const tecnicoSelecionado = Number(estoqueFiltro.tecnico_id || 0);
+    if (!ccSelecionado || !tecnicoSelecionado) return [];
+    return estoquePorTecnico
+      .filter((registro) => registro.cc === ccSelecionado)
+      .filter((registro) => Number(registro.tecnico_id) === tecnicoSelecionado)
+      .sort((a, b) => String(a.itemNome || "").localeCompare(String(b.itemNome || ""), "pt-BR"));
+  }, [estoquePorTecnico, estoqueFiltro.cc, estoqueFiltro.tecnico_id]);
 
-  const abrirAjusteEstoqueTecnico = (registro) => {
+  const removerItemDoTecnico = async (registro) => {
     if (!roleCanAdjustTecnicoStock(usuarioAtual)) {
-      notify("Seu usuário não possui permissão para ajustar itens com técnicos.", "error");
+      notify("Seu usuário não possui permissão para remover itens de técnicos.", "error");
       return;
     }
-    if (!estoqueFiltro.tecnico_id) {
-      notify("Selecione um técnico no filtro para ajustar a quantidade.", "error");
-      return;
-    }
-    const tecnico = tecnicosById[Number(estoqueFiltro.tecnico_id)];
-    if (!tecnico) {
-      notify("Técnico selecionado inválido.", "error");
-      return;
-    }
-
-    const quantidadeAtual = Number(registro.comTecnico || 0);
-    setEstoqueAjusteEdicao({
-      itemId: Number(registro.itemId),
-      itemNome: registro.itemNome || `Item #${registro.itemId}`,
-      tecnicoId: Number(tecnico.id),
-      tecnicoNome: tecnico.nome || `Técnico #${tecnico.id}`,
-      cc: tecnico.cc,
-      quantidadeAtual,
-    });
-    setEstoqueAjusteForm({
-      novaQuantidade: String(quantidadeAtual),
-      tipo: "devolucao_tecnico",
-      observacao: "",
-    });
-  };
-
-  const salvarAjusteEstoqueTecnico = async () => {
-    if (!roleCanAdjustTecnicoStock(usuarioAtual)) {
-      notify("Seu usuário não possui permissão para ajustar itens com técnicos.", "error");
-      return;
-    }
-    if (!estoqueAjusteEdicao) {
-      notify("Selecione um item para ajustar.", "error");
-      return;
-    }
-    if (!roleCanManageCC(usuarioAtual, estoqueAjusteEdicao.cc)) {
+    if (!roleCanManageCC(usuarioAtual, registro.cc)) {
       notify("Seu perfil não pode movimentar esse CC.", "error");
       return;
     }
-
-    const novaQuantidade = Number(estoqueAjusteForm.novaQuantidade);
-    if (!Number.isFinite(novaQuantidade) || novaQuantidade < 0) {
-      notify("Informe uma nova quantidade válida (zero ou maior).", "error");
-      return;
-    }
-    if (novaQuantidade > Number(estoqueAjusteEdicao.quantidadeAtual || 0)) {
-      notify("Aumento de quantidade está bloqueado. Este ajuste permite apenas redução por correção.", "error");
+    const quantidade = Number(registro.quantidade || 0);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      notify("Saldo inválido para devolução.", "error");
       return;
     }
 
-    const observacao = String(estoqueAjusteForm.observacao || "").trim();
-    if (!observacao) {
-      notify("A observação é obrigatória para registrar o motivo da alteração.", "error");
-      return;
-    }
-
-    const diferenca = Number(estoqueAjusteEdicao.quantidadeAtual || 0) - novaQuantidade;
-    if (diferenca <= 0) {
-      notify("Nenhuma alteração para salvar.", "error");
-      return;
-    }
-
-    const linha = {
-      tipo: estoqueAjusteForm.tipo,
-      item_id: estoqueAjusteEdicao.itemId,
-      tecnico_id: estoqueAjusteEdicao.tecnicoId,
-      cc: estoqueAjusteEdicao.cc,
-      quantidade: diferenca,
-    };
-    const erroValidacao = validarLinhaMovimentacao(linha);
-    if (erroValidacao) {
-      notify(erroValidacao, "error");
-      return;
-    }
+    const confirmou = window.confirm(
+      `Remover ${quantidade} unidade(s) de ${registro.itemNome} do técnico ${registro.tecnicoNome} e devolver ao estoque de ${registro.cc}?`
+    );
+    if (!confirmou) return;
 
     const payload = [{
-      ...linha,
-      observacao: `Ajuste em Estoque (correção de lançamento): ${observacao}`,
+      tipo: "devolucao_tecnico",
+      item_id: Number(registro.item_id),
+      tecnico_id: Number(registro.tecnico_id),
+      cc: registro.cc,
+      quantidade,
+      observacao: "Remoção manual na aba Com técnicos (retorno ao estoque do CC).",
     }];
     const { error } = await insertMovimentacoesComAutor(payload, usuarioAtual);
     if (error) {
       console.error(error);
-      captureException(error, { op: "salvarAjusteEstoqueTecnico" });
-      notify(getSupabaseErrorMessage(error, "Erro ao salvar ajuste do técnico."), "error");
+      captureException(error, { op: "removerItemDoTecnico" });
+      notify(getSupabaseErrorMessage(error, "Erro ao remover item do técnico."), "error");
       return;
     }
 
     await buscarMovimentacoes();
-    setEstoqueAjusteEdicao(null);
-    setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
-    notify("Ajuste salvo com sucesso.", "success");
+    notify("Item removido do técnico e devolvido ao estoque com sucesso.", "success");
   };
 
   if (!usuarioAtual) {
@@ -4579,7 +4512,7 @@ export default function App() {
         {!carregando && pagina === "estoque" && (
           <div style={styles.section}>
             <div style={styles.sectionHeaderLine}>
-              <h3 style={styles.sectionTitle}>Visão consolidada de estoque</h3>
+              <h3 style={styles.sectionTitle}>Estoque</h3>
               <div style={styles.actionRow}>
                 <button
                   style={styles.secondaryButtonInline}
@@ -4592,147 +4525,180 @@ export default function App() {
                 </button>
               </div>
             </div>
+            <div style={styles.movTabsWrap}>
+              <button
+                type="button"
+                style={{
+                  ...styles.movTabButton,
+                  ...(estoqueAbaAtiva === "consolidado" ? styles.movTabButtonActive : {}),
+                }}
+                onClick={() => {
+                  setEstoqueAbaAtiva("consolidado");
+                  setEstoqueFiltro((prev) => ({ ...prev, tecnico_id: "" }));
+                }}
+              >
+                Consolidado por item
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.movTabButton,
+                  ...(estoqueAbaAtiva === "tecnicos" ? styles.movTabButtonActive : {}),
+                }}
+                onClick={() => setEstoqueAbaAtiva("tecnicos")}
+              >
+                Com técnicos
+              </button>
+            </div>
             <p style={styles.mutedText}>
-              Visualize em uma única tabela os totais por item e CC. Use os filtros para refinar por centro de custo, técnico, item e nome.
+              {estoqueAbaAtiva === "consolidado"
+                ? "Visualize em uma única tabela os totais por item e CC. Nesta visão o filtro principal é por centro de custo."
+                : "Nesta visão você consulta os itens em posse dos técnicos e pode remover linhas para devolver o saldo ao estoque do CC."}
             </p>
             <div style={styles.formGrid}>
               <select
                 style={styles.input}
                 value={estoqueFiltro.cc}
                 onChange={(e) => {
-                  setEstoqueBuscaTecnico("");
-                  setEstoqueAjusteEdicao(null);
-                  setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
                   setEstoqueFiltro({ ...estoqueFiltro, cc: e.target.value, tecnico_id: "" });
                 }}
               >
                 <option value="">Filtrar por CC</option>
                 {CCS.filter((cc) => roleCanViewCC(usuarioAtual, cc)).map((cc) => <option key={cc} value={cc}>{cc}</option>)}
               </select>
-              <input
-                style={styles.input}
-                list="estoque-tecnicos-list"
-                placeholder="Filtrar por técnico (digite para pesquisar)"
-                value={estoqueBuscaTecnico}
-                onChange={(e) => {
-                  const valor = e.target.value;
-                  setEstoqueBuscaTecnico(valor);
-                  const opcao = opcoesTecnicoEstoque.find((opt) => opt.label === valor);
-                  setEstoqueAjusteEdicao(null);
-                  setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
-                  setEstoqueFiltro((prev) => ({ ...prev, tecnico_id: opcao ? opcao.id : "" }));
-                }}
-              />
-              <datalist id="estoque-tecnicos-list">
-                {opcoesTecnicoEstoqueFiltradas.map((opt) => (
-                  <option key={opt.id} value={opt.label} />
-                ))}
-              </datalist>
-              <select style={styles.input} value={estoqueFiltro.item_id} onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, item_id: e.target.value })}>
-                <option value="">Filtrar por item</option>
-                {itens.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
-              </select>
-              <input
-                style={styles.input}
-                placeholder="Pesquisar item por nome"
-                value={estoqueFiltro.busca_nome}
-                onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, busca_nome: e.target.value })}
-              />
-            </div>
-            {estoqueAjusteEdicao && (
-              <div style={{ ...styles.sectionMini, marginTop: 14 }}>
-                <h4 style={styles.sectionMiniTitle}>Ajustar quantidade com técnico</h4>
-                <p style={styles.mutedText}>
-                  Item: <strong>{estoqueAjusteEdicao.itemNome}</strong> • Técnico: <strong>{estoqueAjusteEdicao.tecnicoNome}</strong> • Atual: <strong>{estoqueAjusteEdicao.quantidadeAtual}</strong>
-                </p>
-                <div style={styles.formGrid}>
-                  <input
-                    style={styles.input}
-                    type="number"
-                    min="0"
-                    placeholder="Nova quantidade com técnico"
-                    value={estoqueAjusteForm.novaQuantidade}
-                    onChange={(e) => setEstoqueAjusteForm((prev) => ({ ...prev, novaQuantidade: e.target.value }))}
-                  />
-                  <select
-                    style={styles.input}
-                    value={estoqueAjusteForm.tipo}
-                    onChange={(e) => setEstoqueAjusteForm((prev) => ({ ...prev, tipo: e.target.value }))}
-                  >
-                    <option value="devolucao_tecnico">{LABEL_TIPO.devolucao_tecnico}</option>
-                    <option value="substituicao_perda">{LABEL_TIPO.substituicao_perda}</option>
-                    <option value="substituicao_quebra">{LABEL_TIPO.substituicao_quebra}</option>
-                    <option value="substituicao_desgaste">{LABEL_TIPO.substituicao_desgaste}</option>
+              {estoqueAbaAtiva === "consolidado" ? (
+                <>
+                  <select style={styles.input} value={estoqueFiltro.item_id} onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, item_id: e.target.value })}>
+                    <option value="">Filtrar por item</option>
+                    {itens.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
                   </select>
                   <input
                     style={styles.input}
-                    placeholder="Observação obrigatória (motivo da correção)"
-                    value={estoqueAjusteForm.observacao}
-                    onChange={(e) => setEstoqueAjusteForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                    placeholder="Pesquisar item por nome"
+                    value={estoqueFiltro.busca_nome}
+                    onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, busca_nome: e.target.value })}
                   />
-                </div>
-                <div style={styles.actionRow}>
-                  <button style={styles.primaryButtonInline} onClick={salvarAjusteEstoqueTecnico}>
-                    Salvar ajuste
-                  </button>
-                  <button
-                    style={styles.secondaryButtonInline}
-                    onClick={() => {
-                      setEstoqueAjusteEdicao(null);
-                      setEstoqueAjusteForm({ novaQuantidade: "", tipo: "devolucao_tecnico", observacao: "" });
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            )}
-            <div style={styles.tableWrap}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>Item</th>
-                    <th style={styles.th}>No estoque</th>
-                    <th style={styles.th}>Com técnicos</th>
-                    <th style={styles.th}>Total</th>
-                    <th style={styles.th}>Mínimo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {estoqueConsolidadoFiltrado.length === 0 ? (
-                    <tr><td style={styles.td} colSpan={5}>Nenhum registro encontrado para os filtros selecionados.</td></tr>
-                  ) : (
-                    estoqueConsolidadoFiltrado.map((registro, index) => (
-                      <tr key={`${registro.itemId}-${index}`}>
-                        <td style={styles.td}>{registro.itemNome}</td>
-                        <td style={styles.td}>{registro.estoque}</td>
-                        <td style={styles.td}>
-                          {estoqueFiltro.tecnico_id ? (
-                            <button
-                              type="button"
-                              style={styles.linkButton}
-                              disabled={!roleCanAdjustTecnicoStock(usuarioAtual)}
-                              onClick={() => abrirAjusteEstoqueTecnico(registro)}
-                              title={
-                                roleCanAdjustTecnicoStock(usuarioAtual)
-                                  ? "Editar quantidade com técnico"
-                                  : "Sem permissão para ajustar quantidade com técnico"
-                              }
-                            >
-                              {registro.comTecnico}
-                            </button>
-                          ) : (
-                            registro.comTecnico
-                          )}
-                        </td>
-                        <td style={styles.td}>{registro.total}</td>
-                        <td style={styles.td}>{registro.minimo}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                </>
+              ) : (
+                <select
+                  style={styles.input}
+                  value={estoqueFiltro.tecnico_id}
+                  onChange={(e) => setEstoqueFiltro((prev) => ({ ...prev, tecnico_id: e.target.value }))}
+                >
+                  <option value="">Filtrar por técnico</option>
+                  {tecnicosComEstoqueNoCc.map((tec) => (
+                    <option key={tec.tecnico_id} value={tec.tecnico_id}>
+                      {tec.tecnicoNome}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
+            {estoqueAbaAtiva === "consolidado" ? (
+              <div style={styles.tableWrap}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Item</th>
+                      <th style={styles.th}>No estoque</th>
+                      <th style={styles.th}>Com técnicos</th>
+                      <th style={styles.th}>Total</th>
+                      <th style={styles.th}>Mínimo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {estoqueConsolidadoFiltrado.length === 0 ? (
+                      <tr><td style={styles.td} colSpan={5}>Nenhum registro encontrado para os filtros selecionados.</td></tr>
+                    ) : (
+                      estoqueConsolidadoFiltrado.map((registro, index) => (
+                        <tr key={`${registro.itemId}-${index}`}>
+                          <td style={styles.td}>{registro.itemNome}</td>
+                          <td style={styles.td}>{registro.estoque}</td>
+                          <td style={styles.td}>{registro.comTecnico}</td>
+                          <td style={styles.td}>{registro.total}</td>
+                          <td style={styles.td}>{registro.minimo}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <>
+                <div style={styles.tableWrap}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}>Técnico</th>
+                        <th style={styles.th}>CC</th>
+                        <th style={styles.th}>Itens em posse</th>
+                        <th style={styles.th}>Quantidade total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!estoqueFiltro.cc ? (
+                        <tr><td style={styles.td} colSpan={4}>Selecione um CC para listar os técnicos.</td></tr>
+                      ) : tecnicosComEstoqueNoCc.length === 0 ? (
+                        <tr><td style={styles.td} colSpan={4}>Nenhum técnico com itens para o CC selecionado.</td></tr>
+                      ) : (
+                        tecnicosComEstoqueNoCc.map((registro) => (
+                          <tr key={registro.tecnico_id}>
+                            <td style={styles.td}>
+                              <button
+                                type="button"
+                                style={styles.linkButton}
+                                onClick={() => setEstoqueFiltro((prev) => ({ ...prev, tecnico_id: String(registro.tecnico_id) }))}
+                              >
+                                {registro.tecnicoNome}
+                              </button>
+                            </td>
+                            <td style={styles.td}>{registro.cc}</td>
+                            <td style={styles.td}>{registro.itens}</td>
+                            <td style={styles.td}>{registro.quantidadeTotal}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={styles.tableWrap}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}>Item</th>
+                        <th style={styles.th}>Quantidade com técnico</th>
+                        <th style={styles.th}>Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!estoqueFiltro.tecnico_id ? (
+                        <tr><td style={styles.td} colSpan={3}>Clique no nome do técnico para ver os itens em posse.</td></tr>
+                      ) : itensDoTecnicoNoCc.length === 0 ? (
+                        <tr><td style={styles.td} colSpan={3}>Este técnico não possui itens em posse para o CC filtrado.</td></tr>
+                      ) : (
+                        itensDoTecnicoNoCc.map((registro) => (
+                          <tr key={`${registro.tecnico_id}-${registro.item_id}-${registro.cc}`}>
+                            <td style={styles.td}>{registro.itemNome}</td>
+                            <td style={styles.td}>{registro.quantidade}</td>
+                            <td style={styles.td}>
+                              <button
+                                type="button"
+                                style={styles.deleteButton}
+                                disabled={!roleCanAdjustTecnicoStock(usuarioAtual)}
+                                onClick={() => removerItemDoTecnico(registro)}
+                              >
+                                Excluir linha
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         )}
 
