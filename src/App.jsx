@@ -985,9 +985,11 @@ export default function App() {
       if (!mov.tecnico_id) return;
       const tecnicoId = Number(mov.tecnico_id);
       const itemId = Number(mov.item_id);
+      const cc = resolveCCAlias(mov.cc);
       if (!Number.isFinite(tecnicoId) || tecnicoId <= 0) return;
       if (!Number.isFinite(itemId) || itemId <= 0) return;
-      const chave = `${tecnicoId}-${itemId}`;
+      if (!cc) return;
+      const chave = `${tecnicoId}|${itemId}|${cc}`;
       const quantidade = Number(mov.quantidade || 0);
       if (!Number.isFinite(quantidade) || quantidade <= 0) return;
       if (!mapa[chave]) mapa[chave] = 0;
@@ -1001,14 +1003,14 @@ export default function App() {
   const estoquePorTecnico = useMemo(() => {
     return Object.entries(saldoTecnicoItem)
       .map(([chave, quantidade]) => {
-        const [tecnicoId, itemId] = chave.split("-");
+        const [tecnicoId, itemId, cc] = chave.split("|");
         const tecnico = tecnicosById[Number(tecnicoId)];
         const item = itensById[Number(itemId)];
         return {
           tecnico_id: Number(tecnicoId),
           item_id: Number(itemId),
-          tecnicoNome: tecnico?.nome || "-",
-          cc: tecnico?.cc || "-",
+          tecnicoNome: tecnico?.nome || `Técnico #${tecnicoId}`,
+          cc: cc || "-",
           itemNome: item?.nome || `Item #${itemId}`,
           quantidade: Number(quantidade || 0),
         };
@@ -1056,14 +1058,13 @@ export default function App() {
   });
 
   Object.entries(saldoTecnicoItem).forEach(([chave, quantidade]) => {
-    const splitIndex = chave.lastIndexOf("-");
-    const tecnicoId = Number(chave.slice(0, splitIndex));
-    const itemId = Number(chave.slice(splitIndex + 1));
+    const [tecnicoIdRaw, itemIdRaw, cc] = chave.split("|");
+    const tecnicoId = Number(tecnicoIdRaw);
+    const itemId = Number(itemIdRaw);
 
     const tecnico = tecnicosById[tecnicoId];
     if (!tecnico) return;
 
-    const cc = tecnico.cc;
     const item = itensById[itemId];
     const registroKey = `${cc}-${itemId}`;
 
@@ -2026,7 +2027,7 @@ export default function App() {
     const item = itensById[itemId];
     const tecnicoId = linha.tecnico_id ? Number(linha.tecnico_id) : null;
     const chaveEstoque = `${linha.cc}-${itemId}`;
-    const chaveTecnico = tecnicoId ? `${tecnicoId}-${itemId}` : null;
+    const chaveTecnico = tecnicoId ? `${tecnicoId}|${itemId}|${linha.cc}` : null;
     const saldoAtualEstoque = Number(saldoEstoqueCCItem[chaveEstoque] || 0);
     const saldoAtualTecnico = chaveTecnico ? Number(saldoTecnicoItem[chaveTecnico] || 0) : 0;
 
@@ -2101,7 +2102,7 @@ export default function App() {
       const itemId = Number(linha.item_id);
       const tecnicoId = linha.tecnico_id ? Number(linha.tecnico_id) : null;
       const chaveEstoque = `${linha.cc}-${itemId}`;
-      const chaveTecnico = tecnicoId ? `${tecnicoId}-${itemId}` : null;
+      const chaveTecnico = tecnicoId ? `${tecnicoId}|${itemId}|${linha.cc}` : null;
 
       if (!deltaEstoquePorChave[chaveEstoque]) deltaEstoquePorChave[chaveEstoque] = 0;
 
@@ -2144,9 +2145,9 @@ export default function App() {
     });
     if (conflitoTecnico) {
       const [chave, delta] = conflitoTecnico;
-      const splitIndex = chave.indexOf("-");
-      const tecnicoId = Number(chave.slice(0, splitIndex));
-      const itemId = Number(chave.slice(splitIndex + 1));
+      const [tecnicoIdRaw, itemIdRaw] = chave.split("|");
+      const tecnicoId = Number(tecnicoIdRaw);
+      const itemId = Number(itemIdRaw);
       const tecnico = tecnicosById[tecnicoId];
       const item = itensById[itemId];
       const saldoAtual = Number(saldoTecnicoItem[chave] || 0);
@@ -2155,8 +2156,8 @@ export default function App() {
     }
 
     const conflitoKitSubstituicao = Object.entries(somaSubstituicaoPorTecnicoItem).find(([chave, qtdSomada]) => {
-      const splitIndex = chave.indexOf("-");
-      const itemId = Number(chave.slice(splitIndex + 1));
+      const partes = chave.split("|");
+      const itemId = Number(partes[1]);
       const item = itensById[itemId];
       const kitRef = Math.max(
         Number(item?.qtdKitInst ?? item?.qtd_kit_inst ?? 0),
@@ -2167,9 +2168,9 @@ export default function App() {
     });
     if (conflitoKitSubstituicao) {
       const [chave, qtdSomada] = conflitoKitSubstituicao;
-      const splitIndex = chave.indexOf("-");
-      const tecnicoId = Number(chave.slice(0, splitIndex));
-      const itemId = Number(chave.slice(splitIndex + 1));
+      const [tecnicoIdRaw, itemIdRaw] = chave.split("|");
+      const tecnicoId = Number(tecnicoIdRaw);
+      const itemId = Number(itemIdRaw);
       const tecnico = tecnicosById[tecnicoId];
       const item = itensById[itemId];
       const kitRef = Math.max(
