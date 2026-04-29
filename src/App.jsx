@@ -40,6 +40,7 @@ const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
 const APP_VERSION = "1.2.0";
+const TRANSFERENCIA_TECNICO_TAG = "[TRANSFERENCIA_TECNICO]";
 
 const TIPOS_MOV = [
   { value: "entrada", label: "Entrada em estoque" },
@@ -361,6 +362,24 @@ function triRegistroToDbRow(t) {
   };
 }
 
+function buildTransferenciaTecnicoObservacao(meta) {
+  return `${TRANSFERENCIA_TECNICO_TAG}${JSON.stringify(meta)}`;
+}
+
+function parseTransferenciaTecnicoObservacao(observacao) {
+  const raw = String(observacao || "");
+  if (!raw.startsWith(TRANSFERENCIA_TECNICO_TAG)) return null;
+  const json = raw.slice(TRANSFERENCIA_TECNICO_TAG.length).trim();
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    if (!parsed || !parsed.transfer_id || !parsed.tecnico_id) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -431,6 +450,10 @@ function canViewDashboardValues(usuario) {
 
 function roleCanAdjustTecnicoStock(usuario) {
   return userHasPermission(usuario, "ajusteEstoqueTecnico");
+}
+
+function roleIsAdmin(usuario) {
+  return usuario?.cargo === "Admin";
 }
 
 function parseCCsValue(value) {
@@ -590,6 +613,8 @@ export default function App() {
   const [estoqueFiltro, setEstoqueFiltro] = useState({ cc: "", tecnico_id: "", item_id: "", busca_nome: "" });
   const [estoqueAbaAtiva, setEstoqueAbaAtiva] = useState("consolidado");
   const [mostrarItensZerados, setMostrarItensZerados] = useState(false);
+  const [estoqueAjusteAdmin, setEstoqueAjusteAdmin] = useState(null);
+  const [estoqueAjusteAdminForm, setEstoqueAjusteAdminForm] = useState({ novaQuantidade: "", observacao: "" });
 
   useEffect(() => {
     const onResize = () => {
@@ -966,10 +991,6 @@ export default function App() {
         mapa[chave] -= quantidade;
       }
     });
-    // Regra operacional: saldo de estoque nunca pode ficar negativo.
-    Object.keys(mapa).forEach((chave) => {
-      mapa[chave] = Math.max(0, Number(mapa[chave] || 0));
-    });
     return mapa;
   }, [movimentacoes]);
 
@@ -979,9 +1000,9 @@ export default function App() {
       if (!mov.tecnico_id) return;
       const tecnicoId = Number(mov.tecnico_id);
       const itemId = Number(mov.item_id);
-      const cc = resolveCCAlias(mov.cc);
       if (!Number.isFinite(tecnicoId) || tecnicoId <= 0) return;
       if (!Number.isFinite(itemId) || itemId <= 0) return;
+      const cc = resolveCCAlias(mov.cc);
       if (!cc) return;
       const chave = `${tecnicoId}|${itemId}|${cc}`;
       const quantidade = Number(mov.quantidade || 0);
@@ -1009,7 +1030,7 @@ export default function App() {
           quantidade: Number(quantidade || 0),
         };
       })
-      .filter((registro) => registro.quantidade > 0)
+      .filter((registro) => Number(registro.quantidade || 0) !== 0)
       .filter((registro) => roleCanViewCC(usuarioAtual, registro.cc))
       .sort((a, b) => a.tecnicoNome.localeCompare(b.tecnicoNome, "pt-BR"));
   }, [saldoTecnicoItem, tecnicosById, itensById, usuarioAtual]);
@@ -1055,9 +1076,6 @@ export default function App() {
     const [tecnicoIdRaw, itemIdRaw, cc] = chave.split("|");
     const tecnicoId = Number(tecnicoIdRaw);
     const itemId = Number(itemIdRaw);
-
-    const tecnico = tecnicosById[tecnicoId];
-    if (!tecnico) return;
 
     const item = itensById[itemId];
     const registroKey = `${cc}-${itemId}`;
@@ -1776,6 +1794,50 @@ export default function App() {
     await buscarTecnicos();
   };
 
+  const abrirSolicitacaoTransferenciaTecnico = async (tecnico, ccDestino, origem = "manual") => {
+    const ccOrigem = resolveCCAlias(tecnico?.cc);
+    const ccDestinoResolvido = resolveCCAlias(ccDestino);
+    if (!tecnico || !ccOrigem || !ccDestinoResolvido || ccOrigem === ccDestinoResolvido) {
+      return { solicitada: false, itens: 0 };
+    }
+
+    const itensEmPosse = estoquePorTecnico
+      .filter((registro) => Number(registro.tecnico_id) === Number(tecnico.id))
+      .filter((registro) => String(registro.cc || "").trim() === ccOrigem)
+      .filter((registro) => Number(registro.quantidade || 0) > 0);
+
+    if (!itensEmPosse.length) {
+      return { solicitada: false, itens: 0 };
+    }
+
+    const transferId = uid();
+    const registros = itensEmPosse.map((registro) => ({
+      id: uid(),
+      cc_origem: ccOrigem,
+      cc_destino: ccDestinoResolvido,
+      item_id: Number(registro.item_id),
+      quantidade: Number(registro.quantidade || 0),
+      observacao: buildTransferenciaTecnicoObservacao({
+        transfer_id: transferId,
+        tecnico_id: Number(tecnico.id),
+        tecnico_nome: tecnico.nome || `Técnico #${tecnico.id}`,
+        cc_origem: ccOrigem,
+        cc_destino: ccDestinoResolvido,
+        origem,
+      }),
+      solicitado_por: usuarioAtual?.usuario || "-",
+      solicitado_nome: usuarioAtual?.nome || "-",
+      status: "Pendente",
+      created_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabase
+      .from("triangulacoes")
+      .insert(registros.map((registro) => triRegistroToDbRow(registro)));
+    if (error) throw error;
+    return { solicitada: true, itens: itensEmPosse.length };
+  };
+
   const salvarEdicaoTecnico = async () => {
     if (!tecnicoEditandoId) return;
     const alvo = tecnicosById[Number(tecnicoEditandoId)];
@@ -1794,6 +1856,31 @@ export default function App() {
       alert("Seu perfil não pode atribuir técnicos ao CC selecionado.");
       return;
     }
+    const ccAnterior = resolveCCAlias(alvo.cc);
+    const alterouCc = ccAnterior && ccAnterior !== cc;
+
+    if (alterouCc) {
+      try {
+        const resultado = await abrirSolicitacaoTransferenciaTecnico(alvo, cc, "edicao_tecnico");
+        if (resultado.solicitada) {
+          const { error: updNomeErr } = await supabase.from("tecnicos").update({ nome }).eq("id", tecnicoEditandoId);
+          if (updNomeErr) throw updNomeErr;
+          await Promise.allSettled([buscarTecnicos(), buscarTriangulacoes()]);
+          setTecnicoEditandoId(null);
+          setTecnicoEdicaoDraft({ nome: "", cc: "" });
+          notify(
+            `Transferência de ${alvo.nome} para ${cc} enviada para aprovação (${resultado.itens} item(ns) em posse).`,
+            "warning"
+          );
+          return;
+        }
+      } catch (error) {
+        console.error(error);
+        alert(getSupabaseErrorMessage(error, "Erro ao abrir solicitação de transferência do técnico."));
+        return;
+      }
+    }
+
     const { error } = await supabase.from("tecnicos").update({ nome, cc }).eq("id", tecnicoEditandoId);
     if (error) {
       console.error(error);
@@ -1871,6 +1958,7 @@ export default function App() {
       const paraInserir = [];
       const paraAtualizar = [];
       let semAlteracao = 0;
+      let solicitacoesTransferencia = 0;
       payloadUnico.forEach((row) => {
         const chaveNome = normalizeSearchText(row.nome);
         const existente = tecnicoExistentePorNome.get(chaveNome);
@@ -1883,6 +1971,8 @@ export default function App() {
         if (ccAtual !== row.cc) {
           paraAtualizar.push({
             id: existente.id,
+            nome: existente.nome,
+            ccAnterior: ccAtual,
             cc: row.cc,
           });
           return;
@@ -1896,8 +1986,24 @@ export default function App() {
       }
 
       if (paraAtualizar.length) {
+        const atualizacoesDiretas = [];
+        for (const row of paraAtualizar) {
+          const tecnico = { id: row.id, nome: row.nome, cc: row.ccAnterior };
+          try {
+            const resultado = await abrirSolicitacaoTransferenciaTecnico(tecnico, row.cc, "importacao_tecnicos");
+            if (resultado.solicitada) {
+              solicitacoesTransferencia += 1;
+            } else {
+              atualizacoesDiretas.push(row);
+            }
+          } catch (error) {
+            console.error(error);
+            throw error;
+          }
+        }
+
         const resultados = await Promise.allSettled(
-          paraAtualizar.map((row) =>
+          atualizacoesDiretas.map((row) =>
             supabase.from("tecnicos").update({ cc: row.cc }).eq("id", row.id)
           )
         );
@@ -1909,9 +2015,9 @@ export default function App() {
         }
       }
 
-      await buscarTecnicos();
+      await Promise.allSettled([buscarTecnicos(), buscarTriangulacoes()]);
       alert(
-        `Importação concluída: ${paraInserir.length} novo(s), ${paraAtualizar.length} realocado(s) de CC, ${semAlteracao} sem alteração, ${
+        `Importação concluída: ${paraInserir.length} novo(s), ${paraAtualizar.length - solicitacoesTransferencia} realocado(s) de CC, ${solicitacoesTransferencia} transferência(s) enviada(s) para aprovação, ${semAlteracao} sem alteração, ${
           payload.length - payloadUnico.length
         } nome(s) duplicado(s) na planilha ignorado(s) e ${ignoradosCCInvalido} CC(s) inválido(s) ignorado(s).`
       );
@@ -2013,6 +2119,9 @@ export default function App() {
     }
 
     const tecnico = tecnicosById[Number(linha.tecnico_id)];
+    if (exigeTecnico && !tecnico) {
+      return "Técnico selecionado inválido.";
+    }
     if (exigeTecnico && tecnico && tecnico.cc !== linha.cc) {
       return "O técnico selecionado não pertence ao CC informado.";
     }
@@ -2346,6 +2455,122 @@ export default function App() {
       return;
     }
 
+    const transferenciaMeta = parseTransferenciaTecnicoObservacao(tri.observacao);
+    if (transferenciaMeta) {
+      const { data: todasPendentes, error: pendErr } = await supabase
+        .from("triangulacoes")
+        .select("*")
+        .eq("status", "Pendente");
+      if (pendErr) {
+        console.error(pendErr);
+        notify(getSupabaseErrorMessage(pendErr, "Erro ao carregar solicitações de transferência."), "error");
+        return;
+      }
+      const grupo = (todasPendentes || [])
+        .map(triRegistroFromDbRow)
+        .filter(Boolean)
+        .filter((row) => {
+          const meta = parseTransferenciaTecnicoObservacao(row.observacao);
+          return meta?.transfer_id === transferenciaMeta.transfer_id;
+        });
+      if (!grupo.length) {
+        notify("Solicitação de transferência já foi processada ou não foi encontrada.", "warning");
+        return;
+      }
+
+      const tecnicoId = Number(transferenciaMeta.tecnico_id);
+      const ccOrigem = resolveCCAlias(transferenciaMeta.cc_origem);
+      const ccDestino = resolveCCAlias(transferenciaMeta.cc_destino);
+      if (!Number.isFinite(tecnicoId) || !ccOrigem || !ccDestino) {
+        notify("Dados inválidos na solicitação de transferência.", "error");
+        return;
+      }
+
+      const payloadMovs = [];
+      grupo.forEach((row) => {
+        const itemId = Number(row.item_id);
+        const qtd = Number(row.quantidade || 0);
+        if (!Number.isFinite(itemId) || !Number.isFinite(qtd) || qtd <= 0) return;
+        payloadMovs.push(
+          {
+            tipo: "devolucao_tecnico",
+            item_id: itemId,
+            tecnico_id: tecnicoId,
+            cc: ccOrigem,
+            quantidade: qtd,
+            observacao: `Transferência de técnico aprovada (${ccOrigem} -> ${ccDestino}).`,
+          },
+          {
+            tipo: "triangulacao_saida",
+            item_id: itemId,
+            tecnico_id: null,
+            cc: ccOrigem,
+            quantidade: qtd,
+            observacao: `Transferência de técnico aprovada (${ccOrigem} -> ${ccDestino}).`,
+          },
+          {
+            tipo: "triangulacao_entrada",
+            item_id: itemId,
+            tecnico_id: null,
+            cc: ccDestino,
+            quantidade: qtd,
+            observacao: `Transferência de técnico aprovada (${ccOrigem} -> ${ccDestino}).`,
+          },
+          {
+            tipo: "saida_tecnico",
+            item_id: itemId,
+            tecnico_id: tecnicoId,
+            cc: ccDestino,
+            quantidade: qtd,
+            observacao: `Transferência de técnico aprovada (${ccOrigem} -> ${ccDestino}).`,
+          }
+        );
+      });
+
+      if (!payloadMovs.length) {
+        notify("Não foi possível gerar movimentações para a transferência.", "error");
+        return;
+      }
+
+      const { error: movErr } = await insertMovimentacoesComAutor(payloadMovs, usuarioAtual);
+      if (movErr) {
+        console.error(movErr);
+        captureException(movErr, { op: "aprovarTransferenciaTecnico_mov" });
+        notify(getSupabaseErrorMessage(movErr, "Erro ao aprovar transferência de técnico."), "error");
+        return;
+      }
+
+      const { error: updTecErr } = await supabase
+        .from("tecnicos")
+        .update({ cc: ccDestino })
+        .eq("id", tecnicoId);
+      if (updTecErr) {
+        console.error(updTecErr);
+        captureException(updTecErr, { op: "aprovarTransferenciaTecnico_update_tecnico" });
+        notify(getSupabaseErrorMessage(updTecErr, "Movimentações criadas, mas falhou ao atualizar o CC do técnico."), "error");
+        return;
+      }
+
+      const idsGrupo = grupo.map((row) => row.id);
+      const { error: updTriErr } = await supabase
+        .from("triangulacoes")
+        .update({
+          status: "Aprovada",
+          aprovado_por: usuarioAtual?.usuario || "-",
+          aprovado_nome: usuarioAtual?.nome || "-",
+          approved_at: new Date().toISOString(),
+        })
+        .in("id", idsGrupo);
+      if (updTriErr) {
+        console.error(updTriErr);
+        notify("Transferência aplicada, mas houve falha ao atualizar o status das solicitações.", "warning");
+      } else {
+        notify("Transferência de técnico aprovada e aplicada com sucesso.", "success");
+      }
+      await Promise.allSettled([buscarTriangulacoes(), buscarMovimentacoes(), buscarTecnicos()]);
+      return;
+    }
+
     const saldoAtual = Number(saldoEstoqueCCItem[`${tri.cc_origem}-${tri.item_id}`] || 0);
     if (Number(tri.quantidade) > saldoAtual) {
       notify(`Saldo insuficiente na origem no momento da aprovação. Saldo atual: ${saldoAtual}.`, "error");
@@ -2408,6 +2633,45 @@ export default function App() {
   const reprovarTriangulacao = async (tri) => {
     if (!roleCanApproveTriangulacao(usuarioAtual, tri.cc_origem, tri.cc_destino)) {
       notify("Seu perfil não pode reprovar essa triangulação.", "error");
+      return;
+    }
+    const transferenciaMeta = parseTransferenciaTecnicoObservacao(tri.observacao);
+    if (transferenciaMeta) {
+      const { data: todasPendentes, error: pendErr } = await supabase
+        .from("triangulacoes")
+        .select("*")
+        .eq("status", "Pendente");
+      if (pendErr) {
+        console.error(pendErr);
+        notify(getSupabaseErrorMessage(pendErr, "Erro ao carregar solicitações de transferência."), "error");
+        return;
+      }
+      const idsGrupo = (todasPendentes || [])
+        .map(triRegistroFromDbRow)
+        .filter(Boolean)
+        .filter((row) => {
+          const meta = parseTransferenciaTecnicoObservacao(row.observacao);
+          return meta?.transfer_id === transferenciaMeta.transfer_id;
+        })
+        .map((row) => row.id);
+      if (idsGrupo.length) {
+        const { error: updErr } = await supabase
+          .from("triangulacoes")
+          .update({
+            status: "Reprovada",
+            aprovado_por: usuarioAtual?.usuario || "-",
+            aprovado_nome: usuarioAtual?.nome || "-",
+            approved_at: new Date().toISOString(),
+          })
+          .in("id", idsGrupo);
+        if (updErr) {
+          console.error(updErr);
+          notify(getSupabaseErrorMessage(updErr, "Erro ao reprovar transferência de técnico."), "error");
+          return;
+        }
+      }
+      await buscarTriangulacoes();
+      notify("Transferência de técnico reprovada.", "success");
       return;
     }
     const { error } = await supabase
@@ -2994,6 +3258,149 @@ export default function App() {
       .filter((registro) => Number(registro.tecnico_id) === tecnicoSelecionado)
       .sort((a, b) => String(a.itemNome || "").localeCompare(String(b.itemNome || ""), "pt-BR"));
   }, [estoquePorTecnico, estoqueFiltro.cc, estoqueFiltro.tecnico_id]);
+
+  const abrirAjusteAdminEstoqueCc = (registro) => {
+    if (!roleIsAdmin(usuarioAtual)) {
+      notify("Apenas Admin pode fazer ajuste pontual direto no estoque.", "error");
+      return;
+    }
+    const ccSelecionado = resolveCCAlias(estoqueFiltro.cc);
+    if (!ccSelecionado) {
+      notify("Selecione um CC para ajustar a linha de estoque.", "error");
+      return;
+    }
+    setEstoqueAjusteAdmin({
+      modo: "cc",
+      cc: ccSelecionado,
+      itemId: Number(registro.itemId),
+      itemNome: registro.itemNome,
+      tecnicoId: null,
+      tecnicoNome: null,
+      quantidadeAtual: Number(registro.estoque || 0),
+    });
+    setEstoqueAjusteAdminForm({ novaQuantidade: String(Number(registro.estoque || 0)), observacao: "" });
+  };
+
+  const abrirAjusteAdminEstoqueTecnico = (registro) => {
+    if (!roleIsAdmin(usuarioAtual)) {
+      notify("Apenas Admin pode fazer ajuste pontual em itens com técnicos.", "error");
+      return;
+    }
+    setEstoqueAjusteAdmin({
+      modo: "tecnico",
+      cc: registro.cc,
+      itemId: Number(registro.item_id),
+      itemNome: registro.itemNome,
+      tecnicoId: Number(registro.tecnico_id),
+      tecnicoNome: registro.tecnicoNome,
+      quantidadeAtual: Number(registro.quantidade || 0),
+    });
+    setEstoqueAjusteAdminForm({ novaQuantidade: String(Number(registro.quantidade || 0)), observacao: "" });
+  };
+
+  const salvarAjusteAdminEstoque = async () => {
+    if (!roleIsAdmin(usuarioAtual)) {
+      notify("Apenas Admin pode fazer ajuste pontual direto no estoque.", "error");
+      return;
+    }
+    if (!estoqueAjusteAdmin) {
+      notify("Selecione uma linha para ajustar.", "error");
+      return;
+    }
+    const novaQuantidade = Number(estoqueAjusteAdminForm.novaQuantidade);
+    if (!Number.isFinite(novaQuantidade) || novaQuantidade < 0) {
+      notify("Informe uma nova quantidade válida (zero ou maior).", "error");
+      return;
+    }
+    const observacao = String(estoqueAjusteAdminForm.observacao || "").trim();
+    if (!observacao) {
+      notify("A observação é obrigatória para registrar correção pontual.", "error");
+      return;
+    }
+
+    const atual = Number(estoqueAjusteAdmin.quantidadeAtual || 0);
+    const delta = novaQuantidade - atual;
+    if (delta === 0) {
+      notify("Nenhuma alteração para salvar.", "error");
+      return;
+    }
+
+    let linha = null;
+    let payload = null;
+    if (estoqueAjusteAdmin.modo === "cc") {
+      linha = {
+        tipo: delta > 0 ? "ajuste_positivo" : "ajuste_negativo",
+        item_id: estoqueAjusteAdmin.itemId,
+        tecnico_id: null,
+        cc: estoqueAjusteAdmin.cc,
+        quantidade: Math.abs(delta),
+      };
+    } else {
+      const atualTecnico = Number(estoqueAjusteAdmin.quantidadeAtual || 0);
+      // Saneamento de legado: permite corrigir saldo negativo do técnico para zero
+      // mesmo quando o estoque do CC está zerado.
+      if (atualTecnico < 0 && delta > 0) {
+        if (novaQuantidade > 0) {
+          notify("Para saldo negativo de técnico, a correção pontual só pode zerar até 0.", "error");
+          return;
+        }
+        if (!estoqueAjusteAdmin.tecnicoId) {
+          notify("Técnico inválido para correção pontual.", "error");
+          return;
+        }
+        const quantidadeSaneamento = Math.abs(delta);
+        payload = [
+          {
+            tipo: "ajuste_positivo",
+            item_id: estoqueAjusteAdmin.itemId,
+            tecnico_id: null,
+            cc: estoqueAjusteAdmin.cc,
+            quantidade: quantidadeSaneamento,
+            observacao: `Correção pontual (Admin - saneamento negativo técnico): ${observacao}`,
+          },
+          {
+            tipo: "saida_tecnico",
+            item_id: estoqueAjusteAdmin.itemId,
+            tecnico_id: estoqueAjusteAdmin.tecnicoId,
+            cc: estoqueAjusteAdmin.cc,
+            quantidade: quantidadeSaneamento,
+            observacao: `Correção pontual (Admin - saneamento negativo técnico): ${observacao}`,
+          },
+        ];
+      }
+
+      linha = {
+        tipo: delta > 0 ? "saida_tecnico" : "devolucao_tecnico",
+        item_id: estoqueAjusteAdmin.itemId,
+        tecnico_id: estoqueAjusteAdmin.tecnicoId,
+        cc: estoqueAjusteAdmin.cc,
+        quantidade: Math.abs(delta),
+      };
+    }
+
+    if (!payload) {
+      const erroValidacao = validarLinhaMovimentacao(linha);
+      if (erroValidacao) {
+        notify(erroValidacao, "error");
+        return;
+      }
+      payload = [{
+        ...linha,
+        observacao: `Correção pontual (Admin): ${observacao}`,
+      }];
+    }
+    const { error } = await insertMovimentacoesComAutor(payload, usuarioAtual);
+    if (error) {
+      console.error(error);
+      captureException(error, { op: "salvarAjusteAdminEstoque" });
+      notify(getSupabaseErrorMessage(error, "Erro ao salvar correção pontual."), "error");
+      return;
+    }
+    await buscarMovimentacoes();
+    setEstoqueAjusteAdmin(null);
+    setEstoqueAjusteAdminForm({ novaQuantidade: "", observacao: "" });
+    notify("Correção pontual aplicada com sucesso.", "success");
+  };
 
   const removerItemDoTecnico = async (registro) => {
     if (!roleCanAdjustTecnicoStock(usuarioAtual)) {
@@ -4555,6 +4962,44 @@ export default function App() {
                 ? "Visualize em uma única tabela os totais por item e CC. Nesta visão o filtro principal é por centro de custo."
                 : "Nesta visão você consulta os itens em posse dos técnicos e pode remover linhas para devolver o saldo ao estoque do CC."}
             </p>
+            {roleIsAdmin(usuarioAtual) && estoqueAjusteAdmin && (
+              <div style={{ ...styles.sectionMini, marginBottom: 12 }}>
+                <h4 style={styles.sectionMiniTitle}>Correção pontual (Admin)</h4>
+                <p style={styles.mutedText}>
+                  {estoqueAjusteAdmin.modo === "cc"
+                    ? `Item: ${estoqueAjusteAdmin.itemNome} | CC: ${estoqueAjusteAdmin.cc} | Atual: ${estoqueAjusteAdmin.quantidadeAtual}`
+                    : `Item: ${estoqueAjusteAdmin.itemNome} | Técnico: ${estoqueAjusteAdmin.tecnicoNome} | CC: ${estoqueAjusteAdmin.cc} | Atual: ${estoqueAjusteAdmin.quantidadeAtual}`}
+                </p>
+                <div style={styles.formGrid}>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    min="0"
+                    placeholder="Nova quantidade"
+                    value={estoqueAjusteAdminForm.novaQuantidade}
+                    onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, novaQuantidade: e.target.value }))}
+                  />
+                  <input
+                    style={styles.input}
+                    placeholder="Observação obrigatória"
+                    value={estoqueAjusteAdminForm.observacao}
+                    onChange={(e) => setEstoqueAjusteAdminForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                  />
+                </div>
+                <div style={styles.actionRow}>
+                  <button style={styles.primaryButtonInline} onClick={salvarAjusteAdminEstoque}>Salvar correção</button>
+                  <button
+                    style={styles.secondaryButtonInline}
+                    onClick={() => {
+                      setEstoqueAjusteAdmin(null);
+                      setEstoqueAjusteAdminForm({ novaQuantidade: "", observacao: "" });
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
             <div style={styles.formGrid}>
               <select
                 style={styles.input}
@@ -4568,10 +5013,6 @@ export default function App() {
               </select>
               {estoqueAbaAtiva === "consolidado" ? (
                 <>
-                  <select style={styles.input} value={estoqueFiltro.item_id} onChange={(e) => setEstoqueFiltro({ ...estoqueFiltro, item_id: e.target.value })}>
-                    <option value="">Filtrar por item</option>
-                    {itens.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
-                  </select>
                   <input
                     style={styles.input}
                     placeholder="Pesquisar item por nome"
@@ -4604,11 +5045,12 @@ export default function App() {
                       <th style={styles.th}>Com técnicos</th>
                       <th style={styles.th}>Total</th>
                       <th style={styles.th}>Mínimo</th>
+                      {roleIsAdmin(usuarioAtual) && <th style={styles.th}>Ação</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {estoqueConsolidadoFiltrado.length === 0 ? (
-                      <tr><td style={styles.td} colSpan={5}>Nenhum registro encontrado para os filtros selecionados.</td></tr>
+                      <tr><td style={styles.td} colSpan={roleIsAdmin(usuarioAtual) ? 6 : 5}>Nenhum registro encontrado para os filtros selecionados.</td></tr>
                     ) : (
                       estoqueConsolidadoFiltrado.map((registro, index) => (
                         <tr key={`${registro.itemId}-${index}`}>
@@ -4617,6 +5059,19 @@ export default function App() {
                           <td style={styles.td}>{registro.comTecnico}</td>
                           <td style={styles.td}>{registro.total}</td>
                           <td style={styles.td}>{registro.minimo}</td>
+                          {roleIsAdmin(usuarioAtual) && (
+                            <td style={styles.td}>
+                              <button
+                                type="button"
+                                style={styles.secondaryButtonInline}
+                                onClick={() => abrirAjusteAdminEstoqueCc(registro)}
+                                disabled={!estoqueFiltro.cc}
+                                title={!estoqueFiltro.cc ? "Selecione um CC para ajustar." : ""}
+                              >
+                                Editar saldo
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
@@ -4654,7 +5109,9 @@ export default function App() {
                             </td>
                             <td style={styles.td}>{registro.cc}</td>
                             <td style={styles.td}>{registro.itens}</td>
-                            <td style={styles.td}>{registro.quantidadeTotal}</td>
+                            <td style={{ ...styles.td, color: registro.quantidadeTotal < 0 ? "#b91c1c" : styles.td.color }}>
+                              {registro.quantidadeTotal}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -4680,13 +5137,25 @@ export default function App() {
                         itensDoTecnicoNoCc.map((registro) => (
                           <tr key={`${registro.tecnico_id}-${registro.item_id}-${registro.cc}`}>
                             <td style={styles.td}>{registro.itemNome}</td>
-                            <td style={styles.td}>{registro.quantidade}</td>
+                            <td style={{ ...styles.td, color: Number(registro.quantidade || 0) < 0 ? "#b91c1c" : styles.td.color }}>
+                              {registro.quantidade}
+                            </td>
                             <td style={styles.td}>
+                              {roleIsAdmin(usuarioAtual) && (
+                                <button
+                                  type="button"
+                                  style={styles.secondaryButtonInline}
+                                  onClick={() => abrirAjusteAdminEstoqueTecnico(registro)}
+                                >
+                                  Editar saldo
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 style={styles.deleteButton}
-                                disabled={!roleCanAdjustTecnicoStock(usuarioAtual)}
+                                disabled={!roleCanAdjustTecnicoStock(usuarioAtual) || Number(registro.quantidade || 0) <= 0}
                                 onClick={() => removerItemDoTecnico(registro)}
+                                title={Number(registro.quantidade || 0) <= 0 ? "Ação disponível apenas para saldo positivo." : ""}
                               >
                                 Excluir linha
                               </button>
