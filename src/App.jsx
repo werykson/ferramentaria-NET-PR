@@ -39,6 +39,7 @@ const DEFAULT_USER_PASSWORD = "EQS@123";
 const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
+const SUPABASE_PAGE_SIZE = 1000;
 const APP_VERSION = "1.3.0";
 const TRANSFERENCIA_TECNICO_TAG = "[TRANSFERENCIA_TECNICO]";
 
@@ -515,6 +516,34 @@ async function withQueryTimeout(promise, label, timeoutMs = 12000) {
   ]);
 }
 
+async function fetchAllMovimentacoes() {
+  let from = 0;
+  const allRows = [];
+
+  while (true) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await withQueryTimeout(
+      supabase
+        .from("movimentacoes")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to),
+      `buscar movimentações (${from + 1}-${to + 1})`,
+      20000
+    );
+
+    if (error) return { data: null, error };
+
+    const pageRows = data || [];
+    allRows.push(...pageRows);
+    if (pageRows.length < SUPABASE_PAGE_SIZE) break;
+    from += SUPABASE_PAGE_SIZE;
+  }
+
+  return { data: allRows, error: null };
+}
+
 async function insertMovimentacoesComAutor(linhas, usuario) {
   const payloadComAutor = linhas.map((linha) => ({
     ...linha,
@@ -803,14 +832,7 @@ export default function App() {
     let data = null;
     let error = null;
     try {
-      const resultado = await withQueryTimeout(
-        supabase
-          .from("movimentacoes")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .order("id", { ascending: false }),
-        "buscar movimentações"
-      );
+      const resultado = await fetchAllMovimentacoes();
       data = resultado?.data || null;
       error = resultado?.error || null;
     } catch (err) {
