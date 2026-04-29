@@ -516,25 +516,19 @@ async function withQueryTimeout(promise, label, timeoutMs = 12000) {
   ]);
 }
 
-async function fetchAllMovimentacoes() {
+async function fetchAllPaged(buildQuery, label, timeoutMs = 20000) {
   let from = 0;
   const allRows = [];
 
   while (true) {
     const to = from + SUPABASE_PAGE_SIZE - 1;
     const { data, error } = await withQueryTimeout(
-      supabase
-        .from("movimentacoes")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(from, to),
-      `buscar movimentações (${from + 1}-${to + 1})`,
-      20000
+      buildQuery(from, to),
+      `${label} (${from + 1}-${to + 1})`,
+      timeoutMs
     );
 
     if (error) return { data: null, error };
-
     const pageRows = data || [];
     allRows.push(...pageRows);
     if (pageRows.length < SUPABASE_PAGE_SIZE) break;
@@ -544,29 +538,65 @@ async function fetchAllMovimentacoes() {
   return { data: allRows, error: null };
 }
 
+async function fetchAllMovimentacoes() {
+  return fetchAllPaged(
+    (from, to) =>
+      supabase
+        .from("movimentacoes")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to),
+    "buscar movimentações"
+  );
+}
+
 async function insertMovimentacoesComAutor(linhas, usuario) {
-  const payloadComAutor = linhas.map((linha) => ({
+  const payload = linhas.map((linha) => ({
+    tipo: linha.tipo,
+    item_id: Number(linha.item_id),
+    tecnico_id: linha.tecnico_id ? Number(linha.tecnico_id) : null,
+    cc: linha.cc,
+    quantidade: Number(linha.quantidade),
+    observacao: linha.observacao?.trim() || null,
+  }));
+
+  const tentativaRpc = await supabase.rpc("rpc_aplicar_movimentacoes_lote", {
+    p_linhas: payload,
+    p_movimentado_por: usuario?.usuario || null,
+    p_movimentado_nome: usuario?.nome || null,
+  });
+  if (!tentativaRpc.error) {
+    return { error: null, salvouAutor: true, usouRpc: true };
+  }
+
+  const erroTexto = String(tentativaRpc.error?.message || "").toLowerCase();
+  const rpcAusente = erroTexto.includes("rpc_aplicar_movimentacoes_lote") || erroTexto.includes("does not exist");
+
+  if (!rpcAusente) {
+    return { error: tentativaRpc.error, salvouAutor: false, usouRpc: false };
+  }
+
+  const payloadComAutor = payload.map((linha) => ({
     ...linha,
     movimentado_por: usuario?.usuario || null,
     movimentado_nome: usuario?.nome || null,
   }));
-
   const tentativaComAutor = await supabase.from("movimentacoes").insert(payloadComAutor);
   if (!tentativaComAutor.error) {
-    return { error: null, salvouAutor: true };
+    return { error: null, salvouAutor: true, usouRpc: false };
   }
 
-  const erroTexto = String(tentativaComAutor.error?.message || "").toLowerCase();
+  const erroInsercaoComAutor = String(tentativaComAutor.error?.message || "").toLowerCase();
   const colunaAutorAusente =
-    erroTexto.includes("movimentado_por") ||
-    erroTexto.includes("movimentado_nome");
-
+    erroInsercaoComAutor.includes("movimentado_por") ||
+    erroInsercaoComAutor.includes("movimentado_nome");
   if (!colunaAutorAusente) {
-    return { error: tentativaComAutor.error, salvouAutor: false };
+    return { error: tentativaComAutor.error, salvouAutor: false, usouRpc: false };
   }
 
-  const tentativaLegado = await supabase.from("movimentacoes").insert(linhas);
-  return { error: tentativaLegado.error || null, salvouAutor: false };
+  const tentativaLegado = await supabase.from("movimentacoes").insert(payload);
+  return { error: tentativaLegado.error || null, salvouAutor: false, usouRpc: false };
 }
 
 function validarPoliticaSenha(senha) {
@@ -615,6 +645,9 @@ export default function App() {
   const [tecnicoEdicaoDraft, setTecnicoEdicaoDraft] = useState({ nome: "", cc: "" });
 
   const [movimentacoes, setMovimentacoes] = useState([]);
+  const [saldosEstoqueRows, setSaldosEstoqueRows] = useState([]);
+  const [saldosTecnicoRows, setSaldosTecnicoRows] = useState([]);
+  const [saldosConsolidadosAtivos, setSaldosConsolidadosAtivos] = useState(true);
   const [movForm, setMovForm] = useState(emptyMovForm);
   const [loteMovimentacoes, setLoteMovimentacoes] = useState([]);
   const [movBuscaItem, setMovBuscaItem] = useState("");
@@ -623,6 +656,8 @@ export default function App() {
   const [movFiltroDataFim, setMovFiltroDataFim] = useState("");
   const [movLimiteLinhas, setMovLimiteLinhas] = useState(LIMITE_PADRAO_LISTA);
   const [movPaginaAtual, setMovPaginaAtual] = useState(1);
+  const [conciliacaoSaldosResumo, setConciliacaoSaldosResumo] = useState(null);
+  const [conciliacaoSaldosCarregando, setConciliacaoSaldosCarregando] = useState(false);
 
   const [triangulacoes, setTriangulacoes] = useState([]);
   const [triForm, setTriForm] = useState(emptyTriForm);
@@ -667,6 +702,7 @@ export default function App() {
   const [buscaUsuario, setBuscaUsuario] = useState("");
   const [buscaItem, setBuscaItem] = useState("");
   const ultimoRefreshPorPaginaRef = useRef({ pagina: "", ts: 0 });
+  const avisoSaldosErroRef = useRef(false);
 
   useEffect(() => {
     if (pagina === "usuarios" && !roleCanManageUsers(usuarioAtual)) {
@@ -694,7 +730,7 @@ export default function App() {
     if (refreshMuitoRecente) return;
 
     ultimoRefreshPorPaginaRef.current = { pagina, ts: agora };
-    buscarMovimentacoes();
+    Promise.allSettled([buscarMovimentacoes(), buscarSaldosConsolidados()]);
   }, [pagina, usuarioAtual, carregando]);
 
   const carregarUsuariosSistema = async () => {
@@ -846,6 +882,112 @@ export default function App() {
     setMovimentacoes(data || []);
   };
 
+  const buscarSaldosConsolidados = async () => {
+    let estoqueData = null;
+    let tecnicoData = null;
+    let error = null;
+    try {
+      const [estoqueResult, tecnicoResult] = await Promise.all([
+        fetchAllPaged(
+          (from, to) =>
+            supabase
+              .from("saldos_estoque_item_cc")
+              .select("*")
+              .order("item_id", { ascending: true })
+              .order("cc", { ascending: true })
+              .range(from, to),
+          "buscar saldos de estoque"
+        ),
+        fetchAllPaged(
+          (from, to) =>
+            supabase
+              .from("saldos_tecnico_item_cc")
+              .select("*")
+              .order("tecnico_id", { ascending: true })
+              .order("item_id", { ascending: true })
+              .order("cc", { ascending: true })
+              .range(from, to),
+          "buscar saldos de técnico"
+        ),
+      ]);
+      error = estoqueResult?.error || tecnicoResult?.error || null;
+      estoqueData = estoqueResult?.data || [];
+      tecnicoData = tecnicoResult?.data || [];
+    } catch (err) {
+      error = err;
+    }
+
+    if (error) {
+      console.error(error);
+      setSaldosConsolidadosAtivos(false);
+      setSaldosEstoqueRows([]);
+      setSaldosTecnicoRows([]);
+      if (!avisoSaldosErroRef.current) {
+        avisoSaldosErroRef.current = true;
+        notify(
+          getSupabaseErrorMessage(
+            error,
+            "Saldos consolidados indisponíveis. Rode a migração sql_migration_saldos_consolidados.sql."
+          ),
+          "warning"
+        );
+      }
+      return;
+    }
+
+    avisoSaldosErroRef.current = false;
+    setSaldosConsolidadosAtivos(true);
+    setSaldosEstoqueRows(estoqueData || []);
+    setSaldosTecnicoRows(tecnicoData || []);
+  };
+
+  const buscarMovimentacoesESaldos = async () => {
+    await Promise.allSettled([buscarMovimentacoes(), buscarSaldosConsolidados()]);
+  };
+
+  const carregarResumoConciliacaoSaldos = async () => {
+    setConciliacaoSaldosCarregando(true);
+    try {
+      const { data, error } = await withQueryTimeout(
+        supabase.rpc("rpc_resumo_conciliacao_saldos"),
+        "resumo de conciliação"
+      );
+      if (error) throw error;
+      setConciliacaoSaldosResumo(data || null);
+    } catch (error) {
+      console.error(error);
+      notify(getSupabaseErrorMessage(error, "Erro ao carregar resumo de conciliação de saldos."), "error");
+    } finally {
+      setConciliacaoSaldosCarregando(false);
+    }
+  };
+
+  const executarBackfillSaldos = async () => {
+    if (!roleIsAdmin(usuarioAtual)) {
+      notify("Apenas Admin pode executar backfill de saldos.", "error");
+      return;
+    }
+    if (!window.confirm("Reconstruir saldos consolidados a partir do histórico agora?")) return;
+    setConciliacaoSaldosCarregando(true);
+    try {
+      const { data, error } = await withQueryTimeout(
+        supabase.rpc("rpc_rebuild_saldos_from_movimentacoes"),
+        "backfill de saldos",
+        30000
+      );
+      if (error) throw error;
+      notify("Backfill de saldos concluído com sucesso.", "success");
+      setConciliacaoSaldosResumo(data || null);
+      await buscarMovimentacoesESaldos();
+      await carregarResumoConciliacaoSaldos();
+    } catch (error) {
+      console.error(error);
+      notify(getSupabaseErrorMessage(error, "Erro ao executar backfill de saldos."), "error");
+    } finally {
+      setConciliacaoSaldosCarregando(false);
+    }
+  };
+
   const buscarTriangulacoes = async () => {
     let data = null;
     let error = null;
@@ -903,12 +1045,12 @@ export default function App() {
     setCarregando(true);
     setCarregandoMovimentacoes(true);
     try {
-      await Promise.allSettled([buscarItens(), buscarTecnicos(), buscarTriangulacoes()]);
+      await Promise.allSettled([buscarItens(), buscarTecnicos(), buscarTriangulacoes(), buscarSaldosConsolidados()]);
     } finally {
       setCarregando(false);
     }
     try {
-      await buscarMovimentacoes();
+      await buscarMovimentacoesESaldos();
     } finally {
       setCarregandoMovimentacoes(false);
     }
@@ -921,6 +1063,11 @@ export default function App() {
   useEffect(() => {
     carregarUsuariosSistema();
   }, []);
+
+  useEffect(() => {
+    if (!usuarioAtual || !roleIsAdmin(usuarioAtual)) return;
+    carregarResumoConciliacaoSaldos();
+  }, [usuarioAtual]);
 
   useEffect(() => {
     if (!usuarioAtual) return;
@@ -988,6 +1135,20 @@ export default function App() {
   );
 
   const saldoEstoqueCCItem = useMemo(() => {
+    if (saldosConsolidadosAtivos) {
+      const mapa = {};
+      saldosEstoqueRows.forEach((row) => {
+        const cc = resolveCCAlias(row.cc);
+        const itemId = Number(row.item_id);
+        if (!cc) return;
+        if (!Number.isFinite(itemId) || itemId <= 0) return;
+        const quantidade = Number(row.quantidade || 0);
+        if (!Number.isFinite(quantidade) || quantidade === 0) return;
+        mapa[`${cc}-${itemId}`] = quantidade;
+      });
+      return mapa;
+    }
+
     const mapa = {};
     movimentacoes.forEach((mov) => {
       const cc = resolveCCAlias(mov.cc);
@@ -1015,9 +1176,25 @@ export default function App() {
       }
     });
     return mapa;
-  }, [movimentacoes]);
+  }, [saldosConsolidadosAtivos, saldosEstoqueRows, movimentacoes]);
 
   const saldoTecnicoItem = useMemo(() => {
+    if (saldosConsolidadosAtivos) {
+      const mapa = {};
+      saldosTecnicoRows.forEach((row) => {
+        const tecnicoId = Number(row.tecnico_id);
+        const itemId = Number(row.item_id);
+        const cc = resolveCCAlias(row.cc);
+        if (!Number.isFinite(tecnicoId) || tecnicoId <= 0) return;
+        if (!Number.isFinite(itemId) || itemId <= 0) return;
+        if (!cc) return;
+        const quantidade = Number(row.quantidade || 0);
+        if (!Number.isFinite(quantidade) || quantidade === 0) return;
+        mapa[`${tecnicoId}|${itemId}|${cc}`] = quantidade;
+      });
+      return mapa;
+    }
+
     const mapa = {};
     movimentacoes.forEach((mov) => {
       if (!mov.tecnico_id) return;
@@ -1036,7 +1213,7 @@ export default function App() {
       if (mov.tipo === "devolucao_tecnico") mapa[chave] -= quantidade;
     });
     return mapa;
-  }, [movimentacoes]);
+  }, [saldosConsolidadosAtivos, saldosTecnicoRows, movimentacoes]);
 
   const estoquePorTecnico = useMemo(() => {
     return Object.entries(saldoTecnicoItem)
@@ -2107,7 +2284,7 @@ export default function App() {
       const { error: delErr } = await supabase.from("tecnicos").delete().in("id", idsParaExcluir);
       if (delErr) throw delErr;
 
-      await Promise.allSettled([buscarTecnicos(), buscarMovimentacoes()]);
+      await Promise.allSettled([buscarTecnicos(), buscarMovimentacoesESaldos()]);
       alert(`${idsParaExcluir.length} técnico(s) duplicado(s) criado(s) hoje foram removidos com sucesso.`);
     } catch (error) {
       console.error(error);
@@ -2392,7 +2569,7 @@ export default function App() {
       observacao: linha.observacao?.trim() || null,
     }));
 
-    const { error, salvouAutor } = await insertMovimentacoesComAutor(payload, usuarioAtual);
+    const { error, salvouAutor, usouRpc } = await insertMovimentacoesComAutor(payload, usuarioAtual);
     if (error) {
       console.error(error);
       captureException(error, { op: "salvarLoteMovimentacoes" });
@@ -2400,13 +2577,17 @@ export default function App() {
       return;
     }
 
-    await buscarMovimentacoes();
+    await buscarMovimentacoesESaldos();
     setLoteMovimentacoes([]);
     setMovForm(emptyMovForm());
     setMovBuscaItem("");
     setMovBuscaTecnico("");
     if (!salvouAutor) {
       notify("Movimentações salvas, mas seu banco ainda não possui colunas de autor. Rode a migração para exibir o nome no histórico.", "warning");
+      return;
+    }
+    if (!usouRpc) {
+      notify("Movimentações salvas em modo legado. Aplique a migração de saldos consolidados para ativar transação no banco.", "warning");
       return;
     }
     notify("Movimentações salvas com sucesso.", "success");
@@ -2590,7 +2771,7 @@ export default function App() {
       } else {
         notify("Transferência de técnico aprovada e aplicada com sucesso.", "success");
       }
-      await Promise.allSettled([buscarTriangulacoes(), buscarMovimentacoes(), buscarTecnicos()]);
+      await Promise.allSettled([buscarTriangulacoes(), buscarMovimentacoesESaldos(), buscarTecnicos()]);
       return;
     }
 
@@ -2619,7 +2800,7 @@ export default function App() {
       },
     ];
 
-    const { error, salvouAutor } = await insertMovimentacoesComAutor(payload, usuarioAtual);
+    const { error, salvouAutor, usouRpc } = await insertMovimentacoesComAutor(payload, usuarioAtual);
     if (error) {
       console.error(error);
       captureException(error, { op: "aprovarTriangulacao_mov" });
@@ -2648,9 +2829,12 @@ export default function App() {
       if (!salvouAutor) {
         notify("Movimentações da triangulação foram salvas sem o nome do autor (migração pendente no banco).", "warning");
       }
+      if (!usouRpc) {
+        notify("Triangulação salva em modo legado. Aplique a migração de saldos consolidados para ativar transação no banco.", "warning");
+      }
     }
     await buscarTriangulacoes();
-    await buscarMovimentacoes();
+    await buscarMovimentacoesESaldos();
   };
 
   const reprovarTriangulacao = async (tri) => {
@@ -3419,7 +3603,7 @@ export default function App() {
       notify(getSupabaseErrorMessage(error, "Erro ao salvar correção pontual."), "error");
       return;
     }
-    await buscarMovimentacoes();
+    await buscarMovimentacoesESaldos();
     setEstoqueAjusteAdmin(null);
     setEstoqueAjusteAdminForm({ novaQuantidade: "", observacao: "" });
     notify("Correção pontual aplicada com sucesso.", "success");
@@ -3461,7 +3645,7 @@ export default function App() {
       return;
     }
 
-    await buscarMovimentacoes();
+    await buscarMovimentacoesESaldos();
     notify("Item removido do técnico e devolvido ao estoque com sucesso.", "success");
   };
 
@@ -3520,7 +3704,7 @@ export default function App() {
       return;
     }
 
-    await buscarMovimentacoes();
+    await buscarMovimentacoesESaldos();
     setEstoqueAjusteMassaForm({ quantidadeAlvo: "", observacao: "" });
     notify(`Correção em massa aplicada com sucesso (${payload.length} item(ns)).`, "success");
   };
@@ -4907,6 +5091,39 @@ export default function App() {
 
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>Histórico de movimentações</h3>
+              <div style={styles.sectionMini}>
+                <div style={styles.actionRow}>
+                  <span style={styles.mutedText}>
+                    Fonte de saldo atual: <strong>{saldosConsolidadosAtivos ? "Saldos consolidados" : "Histórico (fallback)"}</strong>
+                  </span>
+                  {roleIsAdmin(usuarioAtual) && (
+                    <>
+                      <button
+                        type="button"
+                        style={styles.secondaryButtonInline}
+                        onClick={carregarResumoConciliacaoSaldos}
+                        disabled={conciliacaoSaldosCarregando}
+                      >
+                        Atualizar conciliação
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.deleteButton}
+                        onClick={executarBackfillSaldos}
+                        disabled={conciliacaoSaldosCarregando}
+                      >
+                        Rebuild saldos
+                      </button>
+                    </>
+                  )}
+                </div>
+                {roleIsAdmin(usuarioAtual) && conciliacaoSaldosResumo && (
+                  <p style={styles.mutedText}>
+                    Conciliação: {Number(conciliacaoSaldosResumo.divergencias || 0)} divergência(s) em{" "}
+                    {Number(conciliacaoSaldosResumo.total_linhas || 0)} linha(s).
+                  </p>
+                )}
+              </div>
               <div style={styles.sectionMini}>
                 <div style={styles.formGrid}>
                   <input
