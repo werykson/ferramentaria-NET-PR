@@ -615,6 +615,7 @@ export default function App() {
   const [mostrarItensZerados, setMostrarItensZerados] = useState(false);
   const [estoqueAjusteAdmin, setEstoqueAjusteAdmin] = useState(null);
   const [estoqueAjusteAdminForm, setEstoqueAjusteAdminForm] = useState({ novaQuantidade: "", observacao: "" });
+  const [estoqueAjusteMassaForm, setEstoqueAjusteMassaForm] = useState({ quantidadeAlvo: "", observacao: "" });
 
   useEffect(() => {
     const onResize = () => {
@@ -3442,6 +3443,66 @@ export default function App() {
     notify("Item removido do técnico e devolvido ao estoque com sucesso.", "success");
   };
 
+  const aplicarAjusteMassaNoCcAdmin = async () => {
+    if (!roleIsAdmin(usuarioAtual)) {
+      notify("Apenas Admin pode aplicar correção em massa.", "error");
+      return;
+    }
+    const ccSelecionado = resolveCCAlias(estoqueFiltro.cc);
+    if (!ccSelecionado) {
+      notify("Selecione um CC para aplicar a correção em massa.", "error");
+      return;
+    }
+    const quantidadeAlvo = Number(estoqueAjusteMassaForm.quantidadeAlvo);
+    if (!Number.isFinite(quantidadeAlvo) || quantidadeAlvo < 0) {
+      notify("Informe uma quantidade alvo válida (zero ou maior).", "error");
+      return;
+    }
+    const observacao = String(estoqueAjusteMassaForm.observacao || "").trim();
+    if (!observacao) {
+      notify("A observação é obrigatória para correção em massa.", "error");
+      return;
+    }
+
+    const payload = [];
+    itens.forEach((item) => {
+      const itemId = Number(item.id);
+      const saldoAtual = Number(saldoEstoqueCCItem[`${ccSelecionado}-${itemId}`] || 0);
+      const delta = quantidadeAlvo - saldoAtual;
+      if (delta === 0) return;
+      payload.push({
+        tipo: delta > 0 ? "ajuste_positivo" : "ajuste_negativo",
+        item_id: itemId,
+        tecnico_id: null,
+        cc: ccSelecionado,
+        quantidade: Math.abs(delta),
+        observacao: `Correção pontual em massa (Admin): ${observacao}`,
+      });
+    });
+
+    if (!payload.length) {
+      notify("Nenhuma linha precisa de ajuste para a quantidade informada.", "warning");
+      return;
+    }
+
+    const confirmou = window.confirm(
+      `Aplicar quantidade ${quantidadeAlvo} para todos os itens de ${ccSelecionado}? Serão geradas ${payload.length} movimentações de ajuste.`
+    );
+    if (!confirmou) return;
+
+    const { error } = await insertMovimentacoesComAutor(payload, usuarioAtual);
+    if (error) {
+      console.error(error);
+      captureException(error, { op: "aplicarAjusteMassaNoCcAdmin" });
+      notify(getSupabaseErrorMessage(error, "Erro ao aplicar correção em massa."), "error");
+      return;
+    }
+
+    await buscarMovimentacoes();
+    setEstoqueAjusteMassaForm({ quantidadeAlvo: "", observacao: "" });
+    notify(`Correção em massa aplicada com sucesso (${payload.length} item(ns)).`, "success");
+  };
+
   if (!usuarioAtual) {
     return (
       <>
@@ -4997,6 +5058,35 @@ export default function App() {
                 </select>
               )}
             </div>
+            {roleIsAdmin(usuarioAtual) && estoqueAbaAtiva === "consolidado" && estoqueFiltro.cc && (
+              <div style={{ ...styles.sectionMini, marginBottom: 12 }}>
+                <h4 style={styles.sectionMiniTitle}>Correção pontual em massa (Admin)</h4>
+                <p style={styles.mutedText}>
+                  Defina uma quantidade alvo para todos os itens do CC selecionado.
+                </p>
+                <div style={styles.formGrid}>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    min="0"
+                    placeholder="Quantidade alvo para todos os itens"
+                    value={estoqueAjusteMassaForm.quantidadeAlvo}
+                    onChange={(e) => setEstoqueAjusteMassaForm((prev) => ({ ...prev, quantidadeAlvo: e.target.value }))}
+                  />
+                  <input
+                    style={styles.input}
+                    placeholder="Observação obrigatória"
+                    value={estoqueAjusteMassaForm.observacao}
+                    onChange={(e) => setEstoqueAjusteMassaForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                  />
+                </div>
+                <div style={styles.actionRow}>
+                  <button style={styles.primaryButtonInline} onClick={aplicarAjusteMassaNoCcAdmin}>
+                    Aplicar em todos os itens do CC
+                  </button>
+                </div>
+              </div>
+            )}
             {estoqueAbaAtiva === "consolidado" ? (
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
