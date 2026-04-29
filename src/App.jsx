@@ -40,7 +40,7 @@ const MAX_INATIVIDADE_MS = 60 * 60 * 1000;
 const LIMITE_PADRAO_LISTA = 15;
 const OPCOES_LIMITE_LISTA = [15, 25, 50, 100, "tudo"];
 const SUPABASE_PAGE_SIZE = 1000;
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const TRANSFERENCIA_TECNICO_TAG = "[TRANSFERENCIA_TECNICO]";
 
 const TIPOS_MOV = [
@@ -626,6 +626,7 @@ export default function App() {
   const [movimentacoesAbaAtiva, setMovimentacoesAbaAtiva] = useState("lancar");
   const [dashboardModo, setDashboardModo] = useState("resumo");
   const [dashboardFiltroCc, setDashboardFiltroCc] = useState("");
+  const [dashboardOrdemValorTecnico, setDashboardOrdemValorTecnico] = useState("alfabetica");
   const [dashboardTecnicoSelecionadoId, setDashboardTecnicoSelecionadoId] = useState(null);
   const [dashboardWideLayout, setDashboardWideLayout] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth >= 1360 : true
@@ -1553,8 +1554,21 @@ export default function App() {
         mapa[tecnicoId].valorTotal += valorTotalItem;
       });
 
-    return Object.values(mapa).sort((a, b) => b.valorTotal - a.valorTotal);
-  }, [estoquePorTecnico, itensById, dashboardFiltroCc]);
+    const lista = Object.values(mapa);
+    if (dashboardOrdemValorTecnico === "maior_valor") {
+      return lista.sort((a, b) => Number(b.valorTotal || 0) - Number(a.valorTotal || 0));
+    }
+    if (dashboardOrdemValorTecnico === "menor_valor") {
+      return lista.sort((a, b) => Number(a.valorTotal || 0) - Number(b.valorTotal || 0));
+    }
+    return lista.sort((a, b) => {
+      const nomeA = String(a.tecnicoNome || "");
+      const nomeB = String(b.tecnicoNome || "");
+      const byNome = nomeA.localeCompare(nomeB, "pt-BR");
+      if (byNome !== 0) return byNome;
+      return String(a.cc || "").localeCompare(String(b.cc || ""), "pt-BR");
+    });
+  }, [estoquePorTecnico, itensById, dashboardFiltroCc, dashboardOrdemValorTecnico]);
 
   const valorItensTecnicoSelecionado = useMemo(() => {
     if (!dashboardTecnicoSelecionadoId) return null;
@@ -3995,6 +4009,17 @@ export default function App() {
                 <p style={styles.mutedText}>
                   Soma do valor dos itens que estão com cada técnico (quantidade em posse x valor unitário do item).
                 </p>
+                <div style={{ ...styles.actionRow, marginBottom: 8 }}>
+                  <select
+                    style={styles.inputCompact}
+                    value={dashboardOrdemValorTecnico}
+                    onChange={(e) => setDashboardOrdemValorTecnico(e.target.value)}
+                  >
+                    <option value="alfabetica">Ordem alfabética</option>
+                    <option value="maior_valor">Maior valor</option>
+                    <option value="menor_valor">Menor valor</option>
+                  </select>
+                </div>
                 {!!dashboardFiltroCc && (
                   <p style={{ ...styles.mutedText, fontWeight: 600 }}>
                     Filtro ativo: {dashboardFiltroCc}
