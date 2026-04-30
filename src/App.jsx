@@ -4006,6 +4006,10 @@ export default function App() {
                     Voltar ao Dashboard
                   </button>
                 </div>
+                <p style={{ ...styles.mutedText, textAlign: "right", marginTop: 4 }}>
+                  {valorPorTecnicoVisivel.length === 1 ? "Técnico com ferramental" : "Técnicos com ferramental"}:{" "}
+                  <strong>{valorPorTecnicoVisivel.length}</strong>
+                </p>
                 <p style={styles.mutedText}>
                   Soma do valor dos itens que estão com cada técnico (quantidade em posse x valor unitário do item).
                 </p>
