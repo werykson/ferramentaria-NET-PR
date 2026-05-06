@@ -182,6 +182,7 @@ const emptyMovForm = () => ({
   cc: "",
   quantidade: "",
   observacao: "",
+  valor_nf: "",
 });
 const emptyTriForm = () => ({
   cc_origem: "",
@@ -216,6 +217,19 @@ function itemHasKitFlag(item, flag) {
   const flags = parseKitFlags(item?.kitFlags);
   if (flags.length === 0) return true; // Universal: sem flag entra em todos os kits.
   return flags.includes(flag);
+}
+
+function styleKitTabButton(active) {
+  return {
+    padding: "6px 12px",
+    borderRadius: 8,
+    border: active ? "1px solid #1d4ed8" : "1px solid #cbd5e1",
+    background: active ? "#dbeafe" : "#ffffff",
+    color: "#1e3a8a",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+  };
 }
 
 function safeLocalStorageGet(key, fallback) {
@@ -386,6 +400,25 @@ function formatMoney(value) {
     style: "currency",
     currency: "BRL",
   });
+}
+
+/** Aceita ex. 1234,56 ou 1.234,56 ou 1234.56 → número ou null se inválido */
+function parseMoneyInput(input) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const hasComma = s.includes(",");
+  const hasDot = s.includes(".");
+  let norm;
+  if (hasComma && hasDot) {
+    norm = s.replace(/\./g, "").replace(",", ".");
+  } else if (hasComma) {
+    norm = s.replace(",", ".");
+  } else {
+    norm = s;
+  }
+  const n = Number(norm);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
 }
 
 function roleCanViewAll(usuario) {
@@ -628,6 +661,7 @@ export default function App() {
   const [dashboardFiltroCc, setDashboardFiltroCc] = useState("");
   const [dashboardOrdemValorTecnico, setDashboardOrdemValorTecnico] = useState("alfabetica");
   const [dashboardTecnicoSelecionadoId, setDashboardTecnicoSelecionadoId] = useState(null);
+  const [dashboardTecnicoKitFaltanteAba, setDashboardTecnicoKitFaltanteAba] = useState(null);
   const [dashboardWideLayout, setDashboardWideLayout] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth >= 1360 : true
   );
@@ -1607,6 +1641,83 @@ export default function App() {
     };
   }, [dashboardTecnicoSelecionadoId, dashboardFiltroCc, estoquePorTecnico, itensById]);
 
+  useEffect(() => {
+    setDashboardTecnicoKitFaltanteAba(null);
+  }, [dashboardTecnicoSelecionadoId]);
+
+  const faltantesKitTecnicoSelecionado = useMemo(() => {
+    if (!dashboardTecnicoSelecionadoId || !dashboardTecnicoKitFaltanteAba) return null;
+    const tecnicoId = Number(dashboardTecnicoSelecionadoId);
+    const ccFiltroAtivo = String(dashboardFiltroCc || "").trim();
+    const matchFiltroCc = (cc) => !ccFiltroAtivo || cc === ccFiltroAtivo;
+
+    const possePorItemId = {};
+    estoquePorTecnico
+      .filter((registro) => Number(registro.tecnico_id) === tecnicoId && matchFiltroCc(registro.cc))
+      .forEach((registro) => {
+        const itemId = Number(registro.item_id);
+        possePorItemId[itemId] = (possePorItemId[itemId] || 0) + Number(registro.quantidade || 0);
+      });
+
+    const rows = [];
+    const addRow = (item, qtdNecessaria) => {
+      if (qtdNecessaria <= 0) return;
+      const itemId = Number(item.id);
+      const qtdPosse = Number(possePorItemId[itemId] || 0);
+      const faltante = Math.max(0, qtdNecessaria - qtdPosse);
+      if (faltante <= 0) return;
+      rows.push({
+        itemId,
+        itemNome: item.nome || `Item #${itemId}`,
+        qtdNecessaria,
+        qtdPosse,
+        faltante,
+      });
+    };
+
+    const modo = dashboardTecnicoKitFaltanteAba;
+    if (modo === "hfc") {
+      itens.forEach((item) => {
+        if (Number(item.qtdKitInst ?? 0) <= 0) return;
+        if (!itemHasKitFlag(item, "HFC")) return;
+        addRow(item, Number(item.qtdKitInst));
+      });
+    } else if (modo === "gpon") {
+      itens.forEach((item) => {
+        if (Number(item.qtdKitInst ?? 0) <= 0) return;
+        if (!itemHasKitFlag(item, "GPON")) return;
+        addRow(item, Number(item.qtdKitInst));
+      });
+    } else if (modo === "mdu") {
+      itens.forEach((item) => {
+        if (Number(item.qtdKitMdu ?? 0) <= 0) return;
+        if (!itemHasKitFlag(item, "MDU")) return;
+        addRow(item, Number(item.qtdKitMdu));
+      });
+    } else if (modo === "completo") {
+      itens.forEach((item) => {
+        let qtdNecessaria = 0;
+        const qtdInst = Number(item.qtdKitInst ?? 0);
+        if (itemHasKitFlag(item, "HFC") && qtdInst > 0) {
+          qtdNecessaria += qtdInst;
+        }
+        if (itemHasKitFlag(item, "GPON") && qtdInst > 0) {
+          qtdNecessaria += qtdInst;
+        }
+        addRow(item, qtdNecessaria);
+      });
+    }
+
+    rows.sort((a, b) => String(a.itemNome).localeCompare(String(b.itemNome), "pt-BR"));
+    return rows;
+  }, [
+    dashboardTecnicoSelecionadoId,
+    dashboardTecnicoKitFaltanteAba,
+    dashboardFiltroCc,
+    estoquePorTecnico,
+    itens,
+  ]);
+
   const login = () => {
     if (carregandoUsuarios) {
       alert("Aguarde, carregando usuários...");
@@ -2380,6 +2491,13 @@ export default function App() {
       return `O técnico não possui essa quantidade para devolver. Saldo com técnico: ${saldoAtualTecnico}.`;
     }
 
+    if (linha.tipo === "entrada") {
+      const rawV = String(linha.valor_nf ?? "").trim();
+      if (rawV !== "" && parseMoneyInput(rawV) === null) {
+        return "Informe um valor unitário (NF) válido ou deixe o campo em branco.";
+      }
+    }
+
     return null;
   };
 
@@ -2574,14 +2692,27 @@ export default function App() {
       return;
     }
 
-    const payload = loteMovimentacoes.map((linha) => ({
-      tipo: linha.tipo,
-      item_id: Number(linha.item_id),
-      tecnico_id: linha.tecnico_id ? Number(linha.tecnico_id) : null,
-      cc: linha.cc,
-      quantidade: Number(linha.quantidade),
-      observacao: linha.observacao?.trim() || null,
-    }));
+    const payload = loteMovimentacoes.map((linha) => {
+      let observacao = linha.observacao?.trim() || null;
+      if (linha.tipo === "entrada") {
+        const rawV = String(linha.valor_nf ?? "").trim();
+        if (rawV !== "") {
+          const v = parseMoneyInput(rawV);
+          if (v !== null) {
+            const tag = `Valor unit. atualizado (NF): ${formatMoney(v)}`;
+            observacao = observacao ? `${observacao} | ${tag}` : tag;
+          }
+        }
+      }
+      return {
+        tipo: linha.tipo,
+        item_id: Number(linha.item_id),
+        tecnico_id: linha.tecnico_id ? Number(linha.tecnico_id) : null,
+        cc: linha.cc,
+        quantidade: Number(linha.quantidade),
+        observacao,
+      };
+    });
 
     const { error, salvouAutor, usouRpc } = await insertMovimentacoesComAutor(payload, usuarioAtual);
     if (error) {
@@ -2591,7 +2722,28 @@ export default function App() {
       return;
     }
 
+    for (const linha of loteMovimentacoes) {
+      if (linha.tipo !== "entrada") continue;
+      const rawV = String(linha.valor_nf ?? "").trim();
+      if (!rawV) continue;
+      const v = parseMoneyInput(rawV);
+      if (v === null) continue;
+      const { error: updErr } = await supabase.from("itens").update({ valor: v }).eq("id", Number(linha.item_id));
+      if (updErr) {
+        console.error(updErr);
+        captureException(updErr, { op: "salvarLoteMovimentacoes_atualizarValorItem" });
+        notify(
+          getSupabaseErrorMessage(updErr, "Movimentações salvas, mas falhou ao atualizar o valor unitário de um item."),
+          "error"
+        );
+        await buscarMovimentacoesESaldos();
+        await buscarItens();
+        return;
+      }
+    }
+
     await buscarMovimentacoesESaldos();
+    await buscarItens();
     setLoteMovimentacoes([]);
     setMovForm(emptyMovForm());
     setMovBuscaItem("");
@@ -3948,7 +4100,10 @@ export default function App() {
               <div style={styles.section}>
                 <div style={styles.sectionHeaderLine}>
                   <h3 style={styles.sectionTitle}>
-                    Itens com {valorItensTecnicoSelecionado?.tecnicoNome || "técnico selecionado"}
+                    Itens com{" "}
+                    {valorItensTecnicoSelecionado?.tecnicoNome ||
+                      tecnicosById[Number(dashboardTecnicoSelecionadoId)]?.nome ||
+                      "técnico selecionado"}
                   </h3>
                   <button
                     type="button"
@@ -3963,11 +4118,94 @@ export default function App() {
                     Filtro ativo: {dashboardFiltroCc}
                   </p>
                 )}
+                <p style={styles.mutedText}>
+                  CC:{" "}
+                  <strong>
+                    {valorItensTecnicoSelecionado?.cc ||
+                      tecnicosById[Number(dashboardTecnicoSelecionadoId)]?.cc ||
+                      dashboardFiltroCc ||
+                      "-"}
+                  </strong>
+                </p>
+                <div style={{ ...styles.sectionMini, marginBottom: 12 }}>
+                  <p style={{ ...styles.mutedText, marginBottom: 8 }}>
+                    <strong>Faltantes na posse para completar o kit</strong> (quantidade necessária do item no kit
+                    menos o que o técnico já tem no filtro atual).
+                  </p>
+                  <div style={{ ...styles.actionRow, marginBottom: 0 }}>
+                    <button
+                      type="button"
+                      style={styleKitTabButton(dashboardTecnicoKitFaltanteAba === "hfc")}
+                      onClick={() => setDashboardTecnicoKitFaltanteAba("hfc")}
+                    >
+                      HFC
+                    </button>
+                    <button
+                      type="button"
+                      style={styleKitTabButton(dashboardTecnicoKitFaltanteAba === "gpon")}
+                      onClick={() => setDashboardTecnicoKitFaltanteAba("gpon")}
+                    >
+                      GPON
+                    </button>
+                    <button
+                      type="button"
+                      style={styleKitTabButton(dashboardTecnicoKitFaltanteAba === "mdu")}
+                      onClick={() => setDashboardTecnicoKitFaltanteAba("mdu")}
+                    >
+                      MDU
+                    </button>
+                    <button
+                      type="button"
+                      title="Kit completo: soma das necessidades do kit HFC e do kit GPON (ambos usam qtd no kit instalação), como na regra do sistema."
+                      style={styleKitTabButton(dashboardTecnicoKitFaltanteAba === "completo")}
+                      onClick={() => setDashboardTecnicoKitFaltanteAba("completo")}
+                    >
+                      HFC+GPON
+                    </button>
+                  </div>
+                  {!dashboardTecnicoKitFaltanteAba ? (
+                    <p style={{ ...styles.mutedText, marginTop: 10, marginBottom: 0 }}>
+                      Selecione HFC, GPON, MDU ou HFC+GPON (kit completo) para listar o que falta na posse deste técnico.
+                    </p>
+                  ) : faltantesKitTecnicoSelecionado?.length === 0 ? (
+                    <p style={{ ...styles.mutedText, marginTop: 10, marginBottom: 0, color: "#15803d", fontWeight: 600 }}>
+                      Nada falta neste kit para a posse atual do técnico.
+                    </p>
+                  ) : (
+                    <>
+                      <p style={{ ...styles.mutedText, marginTop: 10, marginBottom: 8, fontWeight: 600 }}>
+                        {dashboardTecnicoKitFaltanteAba === "hfc" && "Kit HFC — itens faltantes"}
+                        {dashboardTecnicoKitFaltanteAba === "gpon" && "Kit GPON — itens faltantes"}
+                        {dashboardTecnicoKitFaltanteAba === "mdu" && "Kit MDU — itens faltantes"}
+                        {dashboardTecnicoKitFaltanteAba === "completo" && "Kit completo (HFC + GPON) — itens faltantes"}
+                      </p>
+                      <div style={styles.tableWrap}>
+                        <table style={styles.table}>
+                          <thead>
+                            <tr>
+                              <th style={styles.th}>Item</th>
+                              <th style={styles.th}>Qtd necessária (kit)</th>
+                              <th style={styles.th}>Na posse</th>
+                              <th style={styles.th}>Falta</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {faltantesKitTecnicoSelecionado.map((registro) => (
+                              <tr key={`kit-falta-${registro.itemId}`}>
+                                <td style={styles.td}>{registro.itemNome}</td>
+                                <td style={styles.td}>{registro.qtdNecessaria}</td>
+                                <td style={styles.td}>{registro.qtdPosse}</td>
+                                <td style={{ ...styles.td, color: "#b45309", fontWeight: 700 }}>{registro.faltante}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
                 {valorItensTecnicoSelecionado ? (
                   <>
-                    <p style={styles.mutedText}>
-                      CC: <strong>{valorItensTecnicoSelecionado.cc}</strong>
-                    </p>
                     <div style={styles.tableWrap}>
                       <table style={styles.table}>
                         <thead>
@@ -4764,7 +5002,7 @@ export default function App() {
                   style={styles.input}
                   value={movForm.tipo}
                   onChange={(e) => {
-                    setMovForm({ ...movForm, tipo: e.target.value, tecnico_id: "" });
+                    setMovForm({ ...movForm, tipo: e.target.value, tecnico_id: "", valor_nf: "" });
                     setMovBuscaTecnico("");
                   }}
                 >
@@ -4790,14 +5028,19 @@ export default function App() {
                     onFocus={() => {
                       if (movForm.item_id && movBuscaItem === labelItemSelecionadoMov) {
                         setMovBuscaItem("");
-                        setMovForm((prev) => ({ ...prev, item_id: "" }));
+                        setMovForm((prev) => ({ ...prev, item_id: "", valor_nf: "" }));
                       }
                     }}
                     onChange={(e) => {
                       const valor = e.target.value;
                       setMovBuscaItem(valor);
                       const opcao = opcoesItemMovimentacao.find((opt) => opt.label === valor);
-                      setMovForm((prev) => ({ ...prev, item_id: opcao ? opcao.id : "" }));
+                      const novoId = opcao ? opcao.id : "";
+                      setMovForm((prev) => ({
+                        ...prev,
+                        item_id: novoId,
+                        valor_nf: String(prev.item_id) === String(novoId) ? prev.valor_nf : "",
+                      }));
                     }}
                   />
                   <datalist id="movimentacao-itens-list">
@@ -4838,6 +5081,30 @@ export default function App() {
                 <input style={styles.input} type="number" placeholder="Quantidade" value={movForm.quantidade} onChange={(e) => setMovForm({ ...movForm, quantidade: e.target.value })} />
                 <input style={styles.input} placeholder="Observação" value={movForm.observacao} onChange={(e) => setMovForm({ ...movForm, observacao: e.target.value })} />
               </div>
+              {movForm.tipo === "entrada" && movForm.item_id ? (
+                <div style={{ ...styles.sectionMini, marginTop: 4, marginBottom: 12 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end" }}>
+                    <div>
+                      <div style={{ ...styles.mutedText, marginBottom: 4 }}>Valor unitário cadastrado</div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>
+                        {formatMoney(itensById[Number(movForm.item_id)]?.valor ?? 0)}
+                      </div>
+                    </div>
+                    <div style={{ flex: "1 1 240px", minWidth: 200 }}>
+                      <label style={{ ...styles.label, marginBottom: 6 }}>Novo valor unitário (NF) — opcional</label>
+                      <input
+                        style={{ ...styles.input, marginBottom: 0 }}
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        placeholder="Ex.: 45,90 (vazio = mantém o cadastro)"
+                        value={movForm.valor_nf}
+                        onChange={(e) => setMovForm({ ...movForm, valor_nf: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {["substituicao_perda", "substituicao_quebra"].includes(movForm.tipo) && (
                 <div style={styles.warningBox}>Atenção: este tipo de substituição exige gerar desconto/cobrança. O aviso final aparecerá quando o lote for salvo.</div>
               )}
@@ -4862,17 +5129,22 @@ export default function App() {
                       <th style={styles.th}>Item</th>
                       <th style={styles.th}>Técnico</th>
                       <th style={styles.th}>Qtd</th>
+                      <th style={styles.th}>Valor NF</th>
                       <th style={styles.th}>Observação</th>
                       <th style={styles.th}>Ação</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loteMovimentacoes.length === 0 ? (
-                      <tr><td style={styles.td} colSpan={7}>Nenhuma linha adicionada ao lote.</td></tr>
+                      <tr><td style={styles.td} colSpan={8}>Nenhuma linha adicionada ao lote.</td></tr>
                     ) : (
                       loteMovimentacoes.map((linha) => {
                         const item = itensById[Number(linha.item_id)];
                         const tecnico = tecnicosById[Number(linha.tecnico_id)];
+                        const vNf =
+                          linha.tipo === "entrada" && String(linha.valor_nf || "").trim() !== ""
+                            ? parseMoneyInput(linha.valor_nf)
+                            : null;
                         return (
                           <tr key={linha.localId}>
                             <td style={styles.td}>{LABEL_TIPO[linha.tipo] || linha.tipo}</td>
@@ -4880,6 +5152,7 @@ export default function App() {
                             <td style={styles.td}>{item?.nome || "-"}</td>
                             <td style={styles.td}>{tecnico?.nome || "-"}</td>
                             <td style={styles.td}>{linha.quantidade}</td>
+                            <td style={styles.td}>{vNf !== null ? formatMoney(vNf) : "—"}</td>
                             <td style={styles.td}>{linha.observacao || "-"}</td>
                             <td style={styles.td}><button style={styles.deleteButton} onClick={() => removerDoLote(linha.localId)}>Remover</button></td>
                           </tr>
